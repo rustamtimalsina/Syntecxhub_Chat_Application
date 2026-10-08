@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import api from '../lib/api';
+import { playIncoming, playSent } from '../lib/sound';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || undefined;
 
@@ -86,6 +87,7 @@ export default function useChat(user, onAuthError) {
 
     socket.on('message:new', (msg) => {
       const cid = msg.conversation;
+            if (msg.sender._id === user._id) playSent(); else playIncoming();
       setMessages((prev) => {
         const list = prev[cid] || [];
         if (list.some((m) => m._id === msg._id)) return prev;
@@ -166,6 +168,12 @@ export default function useChat(user, onAuthError) {
     select(data._id);
     return data;
   }, [select]);
+    const openDm = useCallback(async (userId) => {
+    const { data } = await api.post('/conversations/dm', { userId });
+    setConversations((prev) => (prev.some((c) => c._id === data._id) ? prev : [...prev, data]));
+    select(data._id);
+    return data;
+  }, [select]);
 
   const loading = activeId
     ? (messages[activeId] === undefined || loadingId === activeId) && !historyError
@@ -174,6 +182,6 @@ export default function useChat(user, onAuthError) {
   return {
     conversations, activeId, messages, loading, historyError, reloadHistory, loadError,
     loadConversations, unread, last, online, typing, status,
-    select, send, sendTyping, createRoom,
+    select, send, sendTyping, createRoom, openDm,
   };
 }

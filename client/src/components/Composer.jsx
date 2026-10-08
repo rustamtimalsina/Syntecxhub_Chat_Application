@@ -7,7 +7,7 @@ const typingText = (names) => {
   return 'Several people are typing';
 };
 
-export default function Composer({ roomName, onSend, onTyping, typingNames, disabled }) {
+export default function Composer({ roomName, isDm, onSend, onTyping, typingNames, disabled }) {
   const [text, setText] = useState('');
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
@@ -81,7 +81,7 @@ export default function Composer({ roomName, onSend, onTyping, typingNames, disa
             onChange={change}
             onKeyDown={onKeyDown}
             onBlur={stopTyping}
-            placeholder={`Message ${roomName ? `#${roomName}` : ''}`}
+            placeholder={roomName ? (isDm ? `Message ${roomName}` : `Message #${roomName}`) : 'Message'}
             maxLength={2000}
             disabled={disabled}
             aria-label="Message"

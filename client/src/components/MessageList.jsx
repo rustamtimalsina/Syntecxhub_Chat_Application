@@ -21,7 +21,7 @@ const dayLabel = (d) => {
   });
 };
 
-export default function MessageList({ messages, loading, error, onRetry, conversationId, myId, roomName }) {
+   export default function MessageList({ messages, loading, error, onRetry, conversationId, myId, roomName, isDm }) {
   const scroller = useRef(null);
   const nearBottom = useRef(true);
   const prevLen = useRef(0);
@@ -77,7 +77,7 @@ export default function MessageList({ messages, loading, error, onRetry, convers
           </div>
         ) : messages.length === 0 ? (
           <div className="empty">
-            <h3>Start of #{roomName}</h3>
+               <h3>{isDm ? `Chat with ${roomName}` : `Start of #${roomName}`}</h3>
             <p>No messages yet. Say hello.</p>
           </div>
         ) : (
@@ -107,7 +107,7 @@ export default function MessageList({ messages, loading, error, onRetry, convers
                       </div>
                     )}
                     <div className="bubble">
-                      {!mine && first && <span className="msg-name">{m.sender.name}</span>}
+                         {!mine && first && !isDm && <span className="msg-name">{m.sender.name}</span>}
                       <span className="msg-text">{m.text}</span>
                       <span className="msg-time mono">{time(m.createdAt)}</span>
                     </div>
