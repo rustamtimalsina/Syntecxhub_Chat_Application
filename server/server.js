@@ -22,6 +22,7 @@ app.use(cors({ origin: process.env.CLIENT_URL || '*' }));
 app.use(express.json({ limit: '10kb' }));
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
+app.use('/api/users', require('./routes/users'));
 // Strict limit on login/register: 20 attempts per 15 minutes per IP
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

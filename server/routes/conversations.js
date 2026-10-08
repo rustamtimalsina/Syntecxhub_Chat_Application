@@ -4,6 +4,7 @@ const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const { protect } = require('../middleware/auth');
 const { toSlug } = require('../utils/slug');
+const User = require('../models/User');
 
 router.use(protect);
 
@@ -42,6 +43,48 @@ router.post('/channels', async (req, res) => {
     res.status(201).json(room);
   } catch (err) {
     res.status(400).json({ message: err.message });
+  }
+});
+// Start (or reopen) a private chat with one other user
+router.post('/dm', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!mongoose.isValidObjectId(userId)) {
+      return res.status(400).json({ message: 'Invalid user' });
+    }
+    if (String(userId) === String(req.user._id)) {
+      return res.status(400).json({ message: "You can't message yourself" });
+    }
+    if (!(await User.exists({ _id: userId }))) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const dmKey = [String(req.user._id), String(userId)].sort().join(':');
+    const find = () =>
+      Conversation.findOneAndUpdate(
+        { dmKey },
+        { $setOnInsert: { type: 'dm', dmKey, members: [req.user._id, userId], createdBy: req.user._id } },
+        { upsert: true, new: true }
+      );
+
+    let convo;
+    try {
+      convo = await find();
+    } catch (err) {
+      if (err.code !== 11000) throw err;   // two requests raced; the other one won
+      convo = await Conversation.findOne({ dmKey });
+    }
+    await convo.populate('members', 'name color');
+
+    // Put both users' open sockets into the room and show the chat in both sidebars
+    const io = req.app.get('io');
+    const ids = [String(req.user._id), String(userId)];
+    ids.forEach((id) => io.in(`user:${id}`).socketsJoin(`convo:${convo._id}`));
+    io.to(ids.map((id) => `user:${id}`)).emit('conversation:created', convo);
+
+    res.json(convo);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 });
 

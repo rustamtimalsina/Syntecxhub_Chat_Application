@@ -31,6 +31,7 @@ module.exports = function setupSocket(io) {
       $or: [{ type: 'channel' }, { type: 'dm', members: socket.user._id }],
     }).select('_id');
     socket.join(convos.map((c) => room(c._id)));
+    socket.join(`user:${userId}`);   // a personal room, so we can message one user's tabs
 
     // 3. Presence
     if (!online.has(userId)) online.set(userId, new Set());
