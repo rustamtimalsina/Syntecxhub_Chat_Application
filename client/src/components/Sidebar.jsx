@@ -20,11 +20,12 @@ export default function Sidebar({
         new Date(last[a._id]?.createdAt || a.createdAt)
     );
 
-  const preview = (c, fallback) => {
+    const preview = (c, fallback) => {
     const l = last[c._id];
     if (!l) return fallback;
+    const text = l.deleted ? 'Message deleted' : l.text;
     const mine = String(l.sender._id) === String(user._id);
-    return c.type === 'dm' ? `${mine ? 'You: ' : ''}${l.text}` : `${l.sender.name}: ${l.text}`;
+    return c.type === 'dm' ? `${mine ? 'You: ' : ''}${text}` : `${l.sender.name}: ${text}`;
   };
 
   return (

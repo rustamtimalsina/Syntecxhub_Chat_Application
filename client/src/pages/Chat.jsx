@@ -138,6 +138,8 @@ export default function Chat() {
             error={chat.historyError}
             onRetry={chat.reloadHistory}
             myId={user._id}
+            onEdit={chat.editMessage}
+            onDelete={chat.deleteMessage}
             roomName={title}
             isDm={isDm}
           />

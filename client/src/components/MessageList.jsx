@@ -1,6 +1,6 @@
-import { Fragment, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowDown } from 'lucide-react';
+import { ArrowDown, Pencil, Trash2 } from 'lucide-react';
 import Avatar from './Avatar.jsx';
 
 const EASE = [0.22, 1, 0.36, 1];
@@ -21,16 +21,26 @@ const dayLabel = (d) => {
   });
 };
 
-   export default function MessageList({ messages, loading, error, onRetry, conversationId, myId, roomName, isDm }) {
+export default function MessageList({
+  messages, loading, error, onRetry, conversationId, myId, roomName, isDm, onEdit, onDelete,
+}) {
   const scroller = useRef(null);
   const nearBottom = useRef(true);
   const prevLen = useRef(0);
   const [unseen, setUnseen] = useState(0);
+  const [editingId, setEditingId] = useState(null);
+  const [draft, setDraft] = useState('');
+  const [confirmId, setConfirmId] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState('');
 
   useLayoutEffect(() => {
     prevLen.current = 0;
     nearBottom.current = true;
     setUnseen(0);
+    setEditingId(null);
+    setConfirmId(null);
+    setActionError('');
   }, [conversationId]);
 
   useLayoutEffect(() => {
@@ -47,6 +57,12 @@ const dayLabel = (d) => {
     } else setUnseen((n) => n + added);
   }, [messages, loading, myId]);
 
+  useEffect(() => {
+    if (!actionError) return undefined;
+    const t = setTimeout(() => setActionError(''), 5000);
+    return () => clearTimeout(t);
+  }, [actionError]);
+
   const onScroll = () => {
     const el = scroller.current;
     nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
@@ -56,6 +72,43 @@ const dayLabel = (d) => {
   const jump = () => {
     scroller.current.scrollTo({ top: scroller.current.scrollHeight, behavior: 'smooth' });
     setUnseen(0);
+  };
+
+  const startEdit = (m) => {
+    setConfirmId(null);
+    setActionError('');
+    setDraft(m.text);
+    setEditingId(m._id);
+  };
+  const cancelEdit = () => setEditingId(null);
+
+  const saveEdit = async (m) => {
+    if (busy) return;
+    const clean = draft.trim();
+    if (!clean) return setActionError("A message can't be empty. Delete it instead.");
+    if (clean === m.text) return cancelEdit();
+    setBusy(true);
+    const res = await onEdit(m._id, clean);
+    setBusy(false);
+    if (res.ok) cancelEdit();
+    else setActionError(res.error || 'Could not edit the message');
+  };
+
+  const remove = async (m) => {
+    if (busy) return;
+    setBusy(true);
+    const res = await onDelete(m._id);
+    setBusy(false);
+    setConfirmId(null);
+    if (!res.ok) setActionError(res.error || 'Could not delete the message');
+  };
+
+  const setupEditor = (el) => {
+    if (!el || el.dataset.ready) return;
+    el.dataset.ready = '1';
+    el.style.height = `${el.scrollHeight}px`;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
   };
 
   const now = Date.now();
@@ -77,7 +130,7 @@ const dayLabel = (d) => {
           </div>
         ) : messages.length === 0 ? (
           <div className="empty">
-               <h3>{isDm ? `Chat with ${roomName}` : `Start of #${roomName}`}</h3>
+            <h3>{isDm ? `Chat with ${roomName}` : `Start of #${roomName}`}</h3>
             <p>No messages yet. Say hello.</p>
           </div>
         ) : (
@@ -91,12 +144,15 @@ const dayLabel = (d) => {
                 prev.sender._id !== m.sender._id ||
                 new Date(m.createdAt) - new Date(prev.createdAt) > 5 * 60 * 1000;
               const fresh = now - new Date(m.createdAt) < 8000;
+              const editing = editingId === m._id;
+              const confirming = confirmId === m._id;
+              const canAct = mine && !m.deleted && !editing;
 
               return (
                 <Fragment key={m._id}>
                   {newDay && <div className="day">{dayLabel(m.createdAt)}</div>}
                   <motion.div
-                    className={`msg ${mine ? 'mine' : ''} ${first ? 'first' : ''}`}
+                    className={`msg ${mine ? 'mine' : ''} ${first ? 'first' : ''} ${confirming ? 'confirming' : ''}`}
                     initial={fresh ? { opacity: 0, y: 12, scale: 0.98 } : false}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     transition={{ duration: 0.4, ease: EASE }}
@@ -106,10 +162,76 @@ const dayLabel = (d) => {
                         {first && <Avatar name={m.sender.name} color={m.sender.color} size={32} />}
                       </div>
                     )}
-                    <div className="bubble">
-                         {!mine && first && !isDm && <span className="msg-name">{m.sender.name}</span>}
-                      <span className="msg-text">{m.text}</span>
-                      <span className="msg-time mono">{time(m.createdAt)}</span>
+
+                    {canAct && (
+                      <div className="msg-actions">
+                        {confirming ? (
+                          <>
+                            <span>Delete?</span>
+                            <button className="act danger" onClick={() => remove(m)} disabled={busy}>Delete</button>
+                            <button className="act" onClick={() => setConfirmId(null)}>Cancel</button>
+                          </>
+                        ) : (
+                          <>
+                            <button className="act-icon" onClick={() => startEdit(m)} aria-label="Edit message">
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              className="act-icon"
+                              onClick={() => { setEditingId(null); setConfirmId(m._id); }}
+                              aria-label="Delete message"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    <div className={`bubble ${editing ? 'editing' : ''} ${m.deleted ? 'gone' : ''}`}>
+                      {!mine && first && !isDm && <span className="msg-name">{m.sender.name}</span>}
+
+                      {m.deleted ? (
+                        <span className="msg-text gone">This message was deleted</span>
+                      ) : editing ? (
+                        <div className="edit-box">
+                          <textarea
+                            ref={setupEditor}
+                            value={draft}
+                            maxLength={2000}
+                            aria-label="Edit message"
+                            onChange={(e) => {
+                              setDraft(e.target.value);
+                              e.target.style.height = 'auto';
+                              e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                                e.preventDefault();
+                                saveEdit(m);
+                              } else if (e.key === 'Escape') {
+                                cancelEdit();
+                              }
+                            }}
+                          />
+                          <div className="edit-actions">
+                            <span className="mono">Enter to save · Esc to cancel</span>
+                            <span>
+                              <button className="act" onClick={cancelEdit}>Cancel</button>
+                              <button className="act" onClick={() => saveEdit(m)} disabled={busy}>Save</button>
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="msg-text">{m.text}</span>
+                      )}
+
+                      {!editing && (
+                        <span className="msg-time mono">
+                          {m.edited && !m.deleted && 'edited · '}
+                          {time(m.createdAt)}
+                        </span>
+                      )}
                     </div>
                   </motion.div>
                 </Fragment>
@@ -118,6 +240,8 @@ const dayLabel = (d) => {
           </div>
         )}
       </div>
+
+      {actionError && <p className="action-error" role="alert">{actionError}</p>}
 
       <AnimatePresence>
         {unseen > 0 && (

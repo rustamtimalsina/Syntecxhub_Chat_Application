@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const User = require('./models/User');
 const Conversation = require('./models/Conversation');
 const Message = require('./models/Message');
+const mongoose = require('mongoose');
 
 const room = (id) => `convo:${id}`;
 
@@ -65,6 +66,59 @@ module.exports = function setupSocket(io) {
         ack({ ok: true });
       } catch {
         ack({ ok: false, error: 'Could not send message' });
+      }
+    });
+        // 4b. Edit and delete (only your own messages)
+    const tooFast = () => {
+      const now = Date.now();
+      while (sent.length && now - sent[0] > 5000) sent.shift();
+      if (sent.length >= 10) return true;
+      sent.push(now);
+      return false;
+    };
+
+    socket.on('message:edit', async ({ messageId, text } = {}, ack = () => {}) => {
+      try {
+        if (tooFast()) return ack({ ok: false, error: 'Slow down a little' });
+        if (!mongoose.isValidObjectId(messageId)) return ack({ ok: false, error: 'Message not found' });
+        const clean = typeof text === 'string' ? text.trim() : '';
+        if (!clean) return ack({ ok: false, error: 'Message is empty' });
+        if (clean.length > 2000) return ack({ ok: false, error: 'Message is too long' });
+
+        const msg = await Message.findOne({ _id: messageId, sender: socket.user._id, deleted: { $ne: true } });
+        if (!msg) return ack({ ok: false, error: 'Message not found' });
+        if (!socket.rooms.has(room(msg.conversation))) return ack({ ok: false, error: 'Not allowed' });
+
+        msg.text = clean;
+        msg.edited = true;
+        await msg.save();
+        await msg.populate('sender', 'name color');
+        io.to(room(msg.conversation)).emit('message:updated', msg);
+        ack({ ok: true });
+      } catch {
+        ack({ ok: false, error: 'Could not edit message' });
+      }
+    });
+
+    socket.on('message:delete', async ({ messageId } = {}, ack = () => {}) => {
+      try {
+        if (tooFast()) return ack({ ok: false, error: 'Slow down a little' });
+        if (!mongoose.isValidObjectId(messageId)) return ack({ ok: false, error: 'Message not found' });
+
+        const msg = await Message.findOne({ _id: messageId, sender: socket.user._id });
+        if (!msg) return ack({ ok: false, error: 'Message not found' });
+        if (!socket.rooms.has(room(msg.conversation))) return ack({ ok: false, error: 'Not allowed' });
+
+        if (!msg.deleted) {
+          msg.deleted = true;
+          msg.text = '';
+          await msg.save();
+        }
+        await msg.populate('sender', 'name color');
+        io.to(room(msg.conversation)).emit('message:updated', msg);
+        ack({ ok: true });
+      } catch {
+        ack({ ok: false, error: 'Could not delete message' });
       }
     });
 

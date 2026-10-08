@@ -99,7 +99,15 @@ export default function useChat(user, onAuthError) {
       }
       dropTyping(cid, msg.sender._id);
     });
-
+    socket.on('message:updated', (msg) => {
+      const cid = msg.conversation;
+      setMessages((prev) => {
+        const list = prev[cid];
+        if (!list) return prev;
+        return { ...prev, [cid]: list.map((m) => (m._id === msg._id ? msg : m)) };
+      });
+      setLast((prev) => (prev[cid]?._id === msg._id ? { ...prev, [cid]: msg } : prev));
+    });
     socket.on('typing', ({ conversationId, isTyping, user: u }) => {
       if (!isTyping) return dropTyping(conversationId, u._id);
       setTyping((prev) => ({
@@ -157,6 +165,16 @@ export default function useChat(user, onAuthError) {
       (err, ack) => resolve(err ? { ok: false, error: 'The server took too long. Try again.' } : ack)
     );
   }), []);
+    const request = useCallback((event, payload) => new Promise((resolve) => {
+    const socket = socketRef.current;
+    if (!socket?.connected) return resolve({ ok: false, error: 'Not connected yet. Reconnecting…' });
+    socket.timeout(8000).emit(event, payload, (err, ack) =>
+      resolve(err ? { ok: false, error: 'The server took too long. Try again.' } : ack)
+    );
+  }), []);
+
+  const editMessage = useCallback((messageId, text) => request('message:edit', { messageId, text }), [request]);
+  const deleteMessage = useCallback((messageId) => request('message:delete', { messageId }), [request]);
 
   const sendTyping = useCallback((isTyping) => {
     socketRef.current?.emit('typing', { conversationId: activeRef.current, isTyping });
@@ -182,6 +200,6 @@ export default function useChat(user, onAuthError) {
   return {
     conversations, activeId, messages, loading, historyError, reloadHistory, loadError,
     loadConversations, unread, last, online, typing, status,
-    select, send, sendTyping, createRoom, openDm,
+        select, send, sendTyping, createRoom, openDm, editMessage, deleteMessage,
   };
 }
