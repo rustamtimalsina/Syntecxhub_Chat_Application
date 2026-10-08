@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { Plus, LogOut, X } from 'lucide-react';
+import { Plus, LogOut, X, Search } from 'lucide-react';
 import Avatar from './Avatar.jsx';
 import ThemeToggle from './ThemeToggle.jsx';
 
@@ -7,7 +7,7 @@ const pad = (n) => String(n + 1).padStart(2, '0');
 
 export default function Sidebar({
   user, conversations, activeId, unread, last, open,
-  onSelect, onNewRoom, onLogout, onClose,
+  onSelect, onNewRoom, onSearch, onLogout, onClose,
 }) {
   const channels = conversations.filter((c) => c.type === 'channel');
 
@@ -19,6 +19,11 @@ export default function Sidebar({
           <X size={18} />
         </button>
       </div>
+      <button className="sb-search" onClick={onSearch}>
+  <Search size={15} />
+  <span>Jump to…</span>
+  <kbd className="mono">Ctrl K</kbd>
+</button>
 
       <div className="sb-section">
         <span>Channels</span>

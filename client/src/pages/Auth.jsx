@@ -5,7 +5,7 @@ import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { errorMessage } from '../lib/api';
 import ThemeToggle from '../components/ThemeToggle.jsx';
-import AuthPreview from '../components/AuthPreview.jsx';
+import StageVisual from '../components/StageVisual.jsx';
 import './auth.css';
 
 export default function Auth({ mode }) {
@@ -48,7 +48,7 @@ export default function Auth({ mode }) {
           <p className="stage-sub">Rooms, presence and typing, live as it happens.</p>
         </div>
 
-        <AuthPreview />
+        <StageVisual />
       </section>
 
       <section className="auth-side">

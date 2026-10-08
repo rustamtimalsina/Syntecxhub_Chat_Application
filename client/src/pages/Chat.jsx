@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+   import CommandPalette from '../components/CommandPalette.jsx';
 import { AnimatePresence, MotionConfig } from 'motion/react';
 import { Menu } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -14,6 +15,18 @@ export default function Chat() {
   const chat = useChat(user, logout);
   const [navOpen, setNavOpen] = useState(false);
   const [showNew, setShowNew] = useState(false);
+     const [showPalette, setShowPalette] = useState(false);
+
+   useEffect(() => {
+     const onKey = (e) => {
+       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+         e.preventDefault();
+         setShowPalette((v) => !v);
+       }
+     };
+     window.addEventListener('keydown', onKey);
+     return () => window.removeEventListener('keydown', onKey);
+   }, []);
 
   const channels = chat.conversations.filter((c) => c.type === 'channel');
   const active = chat.conversations.find((c) => c._id === chat.activeId);
@@ -41,6 +54,7 @@ export default function Chat() {
     <MotionConfig reducedMotion="user">
       <div className="chat-shell">
         <Sidebar
+           onSearch={() => { setShowPalette(true); setNavOpen(false); }}
           user={user}
           conversations={chat.conversations}
           activeId={chat.activeId}
@@ -95,9 +109,20 @@ export default function Chat() {
           />
         </section>
 
-        <AnimatePresence>
-          {showNew && <NewRoomModal onCreate={chat.createRoom} onClose={() => setShowNew(false)} />}
-        </AnimatePresence>
+           <AnimatePresence>
+     {showNew && (
+       <NewRoomModal key="new" onCreate={chat.createRoom} onClose={() => setShowNew(false)} />
+     )}
+     {showPalette && (
+       <CommandPalette
+         key="palette"
+         conversations={chat.conversations}
+         unread={chat.unread}
+         onSelect={select}
+         onClose={() => setShowPalette(false)}
+       />
+     )}
+   </AnimatePresence>
       </div>
     </MotionConfig>
   );

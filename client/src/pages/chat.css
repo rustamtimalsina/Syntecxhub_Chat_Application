@@ -107,3 +107,23 @@
   .messages { padding-inline: 14px; }
   .conn-banner { padding-inline: 16px; }
 }
+/* ---------- Jump-to button ---------- */
+.sb-search { display: flex; align-items: center; gap: 10px; height: 38px; margin: 6px 14px 4px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text-3); text-align: left; cursor: pointer; transition: border-color 0.2s, color 0.2s; }
+.sb-search span { flex: 1; font-size: 0.88rem; }
+.sb-search:hover { border-color: var(--line-strong); color: var(--text-2); }
+.sb-search kbd { padding: 2px 6px; border: 1px solid var(--line); border-radius: 6px; font-size: 0.7rem; }
+
+/* ---------- Command palette ---------- */
+.palette-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; justify-content: center; align-items: flex-start; padding: 14vh 20px 20px; background: rgba(8, 6, 4, 0.6); }
+.palette { width: 100%; max-width: 520px; overflow: hidden; border: 1px solid var(--line-strong); border-radius: var(--r-lg); background: var(--surface-1); box-shadow: var(--shadow-lg); }
+.pal-input { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 18px; border-bottom: 1px solid var(--line); color: var(--text-3); }
+.pal-input input { flex: 1; height: 100%; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 1.02rem; }
+.pal-list { display: grid; gap: 2px; max-height: 340px; margin: 0; padding: 8px; overflow-y: auto; list-style: none; }
+.pal-item { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; color: var(--text-2); cursor: pointer; }
+.pal-item.on { background: var(--surface-3); color: var(--text); }
+.pal-item .mono { color: var(--text-3); }
+.pal-item.on .mono { color: var(--accent-text); }
+.pal-name { display: block; font-weight: 500; }
+.pal-desc { display: block; overflow: hidden; font-size: 0.78rem; color: var(--text-3); text-overflow: ellipsis; white-space: nowrap; }
+.pal-empty { margin: 0; padding: 28px; text-align: center; color: var(--text-3); }
+.pal-foot { display: flex; gap: 18px; padding: 10px 18px; border-top: 1px solid var(--line); color: var(--text-3); }

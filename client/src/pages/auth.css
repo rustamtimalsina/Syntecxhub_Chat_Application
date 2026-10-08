@@ -84,3 +84,6 @@
   .stage-title { font-size: 1.9rem; max-width: none; }
   .stage-sub, .preview { display: none; }
 }
+.stage-visual { position: relative; flex: 1; min-height: 320px; }
+.scene-mount { position: absolute; inset: 0; }
+.scene-mount canvas { display: block; width: 100%; height: 100%; }
