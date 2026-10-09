@@ -3,6 +3,8 @@ const User = require('./models/User');
 const Conversation = require('./models/Conversation');
 const Message = require('./models/Message');
 const mongoose = require('mongoose');
+const ReadState = require('./models/ReadState');
+
 
 const room = (id) => `convo:${id}`;
 
@@ -120,6 +122,53 @@ module.exports = function setupSocket(io) {
       } catch {
         ack({ ok: false, error: 'Could not delete message' });
       }
+    });
+        // 4c. Delete for me: hide any message from my own view only
+    socket.on('message:hide', async ({ messageId } = {}, ack = () => {}) => {
+      try {
+        if (tooFast()) return ack({ ok: false, error: 'Slow down a little' });
+        if (!mongoose.isValidObjectId(messageId)) return ack({ ok: false, error: 'Message not found' });
+
+        const msg = await Message.findById(messageId).select('conversation');
+        if (!msg) return ack({ ok: false, error: 'Message not found' });
+        if (!socket.rooms.has(room(msg.conversation))) return ack({ ok: false, error: 'Not allowed' });
+
+        await Message.updateOne({ _id: messageId }, { $addToSet: { hiddenFor: socket.user._id } });
+        // Only this user's own tabs hear about it
+        io.to(`user:${userId}`).emit('message:hidden', {
+          messageId: String(messageId),
+          conversationId: String(msg.conversation),
+        });
+        ack({ ok: true });
+      } catch {
+        ack({ ok: false, error: 'Could not delete the message' });
+      }
+    });
+        // 4d. Read receipts (direct messages only)
+    const lastReadEmit = {};
+    socket.on('conversation:read', async ({ conversationId } = {}) => {
+      try {
+        if (!mongoose.isValidObjectId(conversationId)) return;
+        if (!socket.rooms.has(room(conversationId))) return;
+        const nowMs = Date.now();
+        if (nowMs - (lastReadEmit[conversationId] || 0) < 400) return; // light throttle
+        lastReadEmit[conversationId] = nowMs;
+
+        const convo = await Conversation.findById(conversationId).select('type');
+        if (!convo || convo.type !== 'dm') return;
+
+        const at = new Date();
+        await ReadState.updateOne(
+          { conversation: conversationId, user: socket.user._id },
+          { $set: { lastReadAt: at } },
+          { upsert: true }
+        );
+        io.to(room(conversationId)).emit('conversation:read', {
+          conversationId: String(conversationId),
+          userId,
+          at,
+        });
+      } catch { /* ignore */ }
     });
 
     // 5. Typing indicator (not saved, only relayed)

@@ -13,6 +13,7 @@ const messageSchema = new mongoose.Schema(
     },
     edited: { type: Boolean, default: false },
     deleted: { type: Boolean, default: false },
+    hiddenFor: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], default: [], select: false },
   },
   { timestamps: true }
 );

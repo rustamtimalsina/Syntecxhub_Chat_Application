@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowDown, Pencil, Trash2 } from 'lucide-react';
+import { ArrowDown, Check, CheckCheck, Pencil, Trash2 } from 'lucide-react';
 import Avatar from './Avatar.jsx';
 
 const EASE = [0.22, 1, 0.36, 1];
@@ -22,7 +22,7 @@ const dayLabel = (d) => {
 };
 
 export default function MessageList({
-  messages, loading, error, onRetry, conversationId, myId, roomName, isDm, onEdit, onDelete,
+   messages, loading, error, onRetry, conversationId, myId, roomName, isDm, onEdit, onDelete, onHide, readAt,
 }) {
   const scroller = useRef(null);
   const nearBottom = useRef(true);
@@ -94,14 +94,16 @@ export default function MessageList({
     else setActionError(res.error || 'Could not edit the message');
   };
 
-  const remove = async (m) => {
+  const run = async (action, m, fallback) => {
     if (busy) return;
     setBusy(true);
-    const res = await onDelete(m._id);
+    const res = await action(m._id);
     setBusy(false);
     setConfirmId(null);
-    if (!res.ok) setActionError(res.error || 'Could not delete the message');
+    if (!res.ok) setActionError(res.error || fallback);
   };
+  const deleteForMe = (m) => run(onHide, m, 'Could not delete the message');
+  const deleteForEveryone = (m) => run(onDelete, m, 'Could not delete the message');
 
   const setupEditor = (el) => {
     if (!el || el.dataset.ready) return;
@@ -146,7 +148,8 @@ export default function MessageList({
               const fresh = now - new Date(m.createdAt) < 8000;
               const editing = editingId === m._id;
               const confirming = confirmId === m._id;
-              const canAct = mine && !m.deleted && !editing;
+              const canEdit = mine && !m.deleted && !editing;
+              const canEveryone = mine && !m.deleted;
 
               return (
                 <Fragment key={m._id}>
@@ -163,19 +166,26 @@ export default function MessageList({
                       </div>
                     )}
 
-                    {canAct && (
-                      <div className="msg-actions">
+                    {!editing && (
+                      <div className={`msg-actions ${confirming ? 'confirm' : ''}`}>
                         {confirming ? (
                           <>
                             <span>Delete?</span>
-                            <button className="act danger" onClick={() => remove(m)} disabled={busy}>Delete</button>
+                            <button className="act" onClick={() => deleteForMe(m)} disabled={busy}>For me</button>
+                            {canEveryone && (
+                              <button className="act danger" onClick={() => deleteForEveryone(m)} disabled={busy}>
+                                For everyone
+                              </button>
+                            )}
                             <button className="act" onClick={() => setConfirmId(null)}>Cancel</button>
                           </>
                         ) : (
                           <>
-                            <button className="act-icon" onClick={() => startEdit(m)} aria-label="Edit message">
-                              <Pencil size={14} />
-                            </button>
+                            {canEdit && (
+                              <button className="act-icon" onClick={() => startEdit(m)} aria-label="Edit message">
+                                <Pencil size={14} />
+                              </button>
+                            )}
                             <button
                               className="act-icon"
                               onClick={() => { setEditingId(null); setConfirmId(m._id); }}
@@ -230,6 +240,13 @@ export default function MessageList({
                         <span className="msg-time mono">
                           {m.edited && !m.deleted && 'edited · '}
                           {time(m.createdAt)}
+                          {mine && isDm && !m.deleted && (
+                            readAt && new Date(readAt) >= new Date(m.createdAt) ? (
+                              <CheckCheck size={14} className="tick seen" aria-label="Seen" />
+                            ) : (
+                              <Check size={14} className="tick" aria-label="Sent" />
+                            )
+                          )}
                         </span>
                       )}
                     </div>

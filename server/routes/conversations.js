@@ -5,6 +5,7 @@ const Message = require('../models/Message');
 const { protect } = require('../middleware/auth');
 const { toSlug } = require('../utils/slug');
 const User = require('../models/User');
+const ReadState = require('../models/ReadState');
 
 router.use(protect);
 
@@ -16,7 +17,15 @@ router.get('/', async (req, res) => {
     })
       .sort({ type: 1, createdAt: 1 })
       .populate('members', 'name color');
-    res.json(list);
+        const dmIds = list.filter((c) => c.type === 'dm').map((c) => c._id);
+    const states = dmIds.length
+      ? await ReadState.find({ conversation: { $in: dmIds } }).select('conversation user lastReadAt')
+      : [];
+    const reads = {};
+    states.forEach((s) => {
+      (reads[s.conversation] ||= {})[s.user] = s.lastReadAt;
+    });
+    res.json(list.map((c) => ({ ...c.toObject(), reads: reads[c._id] || {} })));
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -100,7 +109,7 @@ router.get('/:id/messages', async (req, res) => {
     const allowed = convo.type === 'channel' || convo.members.some((m) => m.equals(req.user._id));
     if (!allowed) return res.status(403).json({ message: 'You are not part of this conversation' });
 
-    const filter = { conversation: id };
+    const filter = { conversation: id, hiddenFor: { $ne: req.user._id } };
     if (req.query.before) filter.createdAt = { $lt: new Date(req.query.before) };
 
     const messages = await Message.find(filter)

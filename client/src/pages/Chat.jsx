@@ -58,6 +58,7 @@ export default function Chat() {
   const isDm = active?.type === 'dm';
   const other = isDm ? otherMember(active, user._id) : null;
   const otherOnline = other ? chat.online.has(String(other._id)) : false;
+    const otherReadAt = other ? chat.reads[chat.activeId]?.[String(other._id)] : null;
   const title = isDm ? other?.name || 'Chat' : active?.name;
   const index = channels.findIndex((c) => c._id === chat.activeId);
   const typingNames = Object.entries(chat.typing[chat.activeId] || {})
@@ -140,8 +141,10 @@ export default function Chat() {
             myId={user._id}
             onEdit={chat.editMessage}
             onDelete={chat.deleteMessage}
+            onHide={chat.hideMessage}
             roomName={title}
             isDm={isDm}
+            readAt={otherReadAt}
           />
 
           <Composer

@@ -166,3 +166,9 @@
 .edit-actions .mono { color: rgba(26, 17, 0, 0.6); }
 
 .action-error { position: absolute; right: 24px; bottom: 14px; left: 24px; margin: 0 auto; width: fit-content; max-width: 90%; padding: 9px 14px; border-radius: 10px; background: var(--danger); color: #fff; font-size: 0.85rem; box-shadow: var(--shadow-md); }
+/* ---------- Delete for me / for everyone ---------- */
+.msg:not(.mine) .msg-actions { order: 3; }
+.msg-actions.confirm { flex-wrap: wrap; max-width: 280px; row-gap: 4px; }
+/* ---------- Read receipts ---------- */
+.tick { display: inline-block; margin-left: 5px; vertical-align: -3px; opacity: 0.55; }
+.tick.seen { opacity: 1; color: #0b5d46; }

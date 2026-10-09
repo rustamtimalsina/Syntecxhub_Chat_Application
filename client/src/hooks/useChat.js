@@ -24,6 +24,7 @@ export default function useChat(user, onAuthError) {
   const [online, setOnline] = useState(() => new Set());
   const [typing, setTyping] = useState({}); // conversationId -> { userId: name }
   const [status, setStatus] = useState('connecting');
+    const [reads, setReads] = useState({}); // conversationId -> { userId: lastReadAt }
 
   const socketRef = useRef(null);
   const activeRef = useRef(null);
@@ -33,13 +34,38 @@ export default function useChat(user, onAuthError) {
 
   useEffect(() => { activeRef.current = activeId; }, [activeId]);
   useEffect(() => { authErrorRef.current = onAuthError; }, [onAuthError]);
+    const messagesRef = useRef({});
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+    const convosRef = useRef([]);
+  useEffect(() => { convosRef.current = conversations; }, [conversations]);
+
+  const markRead = useCallback((cid) => {
+    if (!cid || document.hidden) return;
+    if (convosRef.current.find((c) => c._id === cid)?.type !== 'dm') return;
+    socketRef.current?.emit('conversation:read', { conversationId: cid });
+  }, []);
+
+  // Opening a direct message marks it as read
+  useEffect(() => { markRead(activeId); }, [activeId, conversations, markRead]);
+
+  // Coming back to the tab marks the open chat as read
+  useEffect(() => {
+    const onVisible = () => { if (!document.hidden) markRead(activeRef.current); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [markRead]);
 
   // Rooms
   const loadConversations = useCallback(async () => {
     setLoadError(false);
     try {
       const { data } = await api.get('/conversations');
-      setConversations(data);
+           setConversations(data);
+      setReads(Object.fromEntries(data.filter((c) => c.type === 'dm').map((c) => [c._id, c.reads || {}])));
       setActiveId((cur) => cur || data.find((c) => c.slug === 'general')?._id || data[0]?._id || null);
     } catch {
       setLoadError(true);
@@ -71,7 +97,9 @@ export default function useChat(user, onAuthError) {
       setStatus('error');
       if (/token|user not found/i.test(err.message)) authErrorRef.current?.();
     });
-
+       socket.on('conversation:read', ({ conversationId, userId, at }) =>
+      setReads((prev) => ({ ...prev, [conversationId]: { ...(prev[conversationId] || {}), [userId]: at } }))
+    );
     socket.on('presence:list', (ids) => setOnline(new Set(ids)));
     socket.on('presence:update', ({ userId, online: isOn }) =>
       setOnline((prev) => {
@@ -98,6 +126,7 @@ export default function useChat(user, onAuthError) {
         setUnread((prev) => ({ ...prev, [cid]: (prev[cid] || 0) + 1 }));
       }
       dropTyping(cid, msg.sender._id);
+            if (cid === activeRef.current && msg.sender._id !== user._id) markRead(cid);
     });
     socket.on('message:updated', (msg) => {
       const cid = msg.conversation;
@@ -107,6 +136,19 @@ export default function useChat(user, onAuthError) {
         return { ...prev, [cid]: list.map((m) => (m._id === msg._id ? msg : m)) };
       });
       setLast((prev) => (prev[cid]?._id === msg._id ? { ...prev, [cid]: msg } : prev));
+    });
+        socket.on('message:hidden', ({ messageId, conversationId }) => {
+      const rest = (messagesRef.current[conversationId] || []).filter((m) => m._id !== messageId);
+      setMessages((prev) =>
+        prev[conversationId]
+          ? { ...prev, [conversationId]: prev[conversationId].filter((m) => m._id !== messageId) }
+          : prev
+      );
+      setLast((prev) =>
+        prev[conversationId]?._id === messageId
+          ? { ...prev, [conversationId]: rest[rest.length - 1] }
+          : prev
+      );
     });
     socket.on('typing', ({ conversationId, isTyping, user: u }) => {
       if (!isTyping) return dropTyping(conversationId, u._id);
@@ -175,6 +217,7 @@ export default function useChat(user, onAuthError) {
 
   const editMessage = useCallback((messageId, text) => request('message:edit', { messageId, text }), [request]);
   const deleteMessage = useCallback((messageId) => request('message:delete', { messageId }), [request]);
+    const hideMessage = useCallback((messageId) => request('message:hide', { messageId }), [request]);
 
   const sendTyping = useCallback((isTyping) => {
     socketRef.current?.emit('typing', { conversationId: activeRef.current, isTyping });
@@ -199,7 +242,7 @@ export default function useChat(user, onAuthError) {
 
   return {
     conversations, activeId, messages, loading, historyError, reloadHistory, loadError,
-    loadConversations, unread, last, online, typing, status,
-        select, send, sendTyping, createRoom, openDm, editMessage, deleteMessage,
+        loadConversations, unread, last, online, typing, status, reads,
+        select, send, sendTyping, createRoom, openDm, editMessage, deleteMessage, hideMessage,
   };
 }
