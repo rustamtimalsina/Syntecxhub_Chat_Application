@@ -142,6 +142,7 @@ export default function Chat() {
             onEdit={chat.editMessage}
             onDelete={chat.deleteMessage}
             onHide={chat.hideMessage}
+            onReact={chat.reactToMessage}
             roomName={title}
             isDm={isDm}
             readAt={otherReadAt}

@@ -4,6 +4,7 @@ const Conversation = require('./models/Conversation');
 const Message = require('./models/Message');
 const mongoose = require('mongoose');
 const ReadState = require('./models/ReadState');
+const REACTION_KEYS = ['like', 'love', 'laugh', 'wow', 'fire', 'thanks'];
 
 
 const room = (id) => `convo:${id}`;
@@ -169,6 +170,34 @@ module.exports = function setupSocket(io) {
           at,
         });
       } catch { /* ignore */ }
+    });
+        // 4e. Reactions: one per person per message; tapping the same one again removes it
+    socket.on('message:react', async ({ messageId, key } = {}, ack = () => {}) => {
+      try {
+        if (tooFast()) return ack({ ok: false, error: 'Slow down a little' });
+        if (!REACTION_KEYS.includes(key)) return ack({ ok: false, error: 'Unknown reaction' });
+        if (!mongoose.isValidObjectId(messageId)) return ack({ ok: false, error: 'Message not found' });
+
+        const msg = await Message.findById(messageId).select('conversation deleted reactions');
+        if (!msg || msg.deleted) return ack({ ok: false, error: 'Message not found' });
+        if (!socket.rooms.has(room(msg.conversation))) return ack({ ok: false, error: 'Not allowed' });
+
+        const mine = msg.reactions.find((r) => String(r.user) === userId);
+        await Message.updateOne({ _id: messageId }, { $pull: { reactions: { user: socket.user._id } } });
+        if (!mine || mine.key !== key) {
+          await Message.updateOne({ _id: messageId }, { $push: { reactions: { user: socket.user._id, key } } });
+        }
+
+        const fresh = await Message.findById(messageId).select('reactions');
+        io.to(room(msg.conversation)).emit('message:reacted', {
+          messageId: String(messageId),
+          conversationId: String(msg.conversation),
+          reactions: fresh.reactions,
+        });
+        ack({ ok: true });
+      } catch {
+        ack({ ok: false, error: 'Could not react' });
+      }
     });
 
     // 5. Typing indicator (not saved, only relayed)

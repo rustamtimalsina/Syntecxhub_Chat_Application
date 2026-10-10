@@ -150,6 +150,16 @@ export default function useChat(user, onAuthError) {
           : prev
       );
     });
+        socket.on('message:reacted', ({ messageId, conversationId, reactions }) =>
+      setMessages((prev) => {
+        const list = prev[conversationId];
+        if (!list) return prev;
+        return {
+          ...prev,
+          [conversationId]: list.map((m) => (m._id === messageId ? { ...m, reactions } : m)),
+        };
+      })
+    );
     socket.on('typing', ({ conversationId, isTyping, user: u }) => {
       if (!isTyping) return dropTyping(conversationId, u._id);
       setTyping((prev) => ({
@@ -218,7 +228,8 @@ export default function useChat(user, onAuthError) {
   const editMessage = useCallback((messageId, text) => request('message:edit', { messageId, text }), [request]);
   const deleteMessage = useCallback((messageId) => request('message:delete', { messageId }), [request]);
     const hideMessage = useCallback((messageId) => request('message:hide', { messageId }), [request]);
-
+  const reactToMessage = useCallback((messageId, key) => request('message:react', { messageId, key }), [request]);
+  
   const sendTyping = useCallback((isTyping) => {
     socketRef.current?.emit('typing', { conversationId: activeRef.current, isTyping });
   }, []);
@@ -243,6 +254,6 @@ export default function useChat(user, onAuthError) {
   return {
     conversations, activeId, messages, loading, historyError, reloadHistory, loadError,
         loadConversations, unread, last, online, typing, status, reads,
-        select, send, sendTyping, createRoom, openDm, editMessage, deleteMessage, hideMessage,
+        select, send, sendTyping, createRoom, openDm, editMessage, deleteMessage, hideMessage, reactToMessage,
   };
 }

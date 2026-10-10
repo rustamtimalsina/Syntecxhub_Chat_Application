@@ -172,3 +172,15 @@
 /* ---------- Read receipts ---------- */
 .tick { display: inline-block; margin-left: 5px; vertical-align: -3px; opacity: 0.55; }
 .tick.seen { opacity: 1; color: #0b5d46; }
+/* ---------- Reactions ---------- */
+.msg-actions.open { opacity: 1; }
+.react-wrap { position: relative; display: inline-flex; }
+.picker { position: absolute; top: calc(100% + 6px); left: 50%; z-index: 5; display: flex; gap: 2px; padding: 5px; transform: translateX(-50%); border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface-1); box-shadow: var(--shadow-md); }
+.picker button { width: 34px; height: 34px; border: 0; border-radius: 50%; background: transparent; font-size: 1.2rem; line-height: 1; cursor: pointer; transition: transform 0.15s var(--ease), background 0.15s; }
+.picker button:hover { transform: scale(1.22); background: var(--surface-3); }
+
+.reacts { display: flex; flex-wrap: wrap; gap: 4px; clear: both; padding-top: 6px; }
+.react-chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface-1); color: var(--text-2); font-size: 0.8rem; cursor: pointer; transition: transform 0.15s var(--ease); }
+.react-chip b { font-weight: 600; }
+.react-chip:hover { transform: translateY(-1px); }
+.react-chip.mine { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 22%, var(--surface-1)); color: var(--text); }

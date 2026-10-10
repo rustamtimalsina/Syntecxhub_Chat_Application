@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowDown, Check, CheckCheck, Pencil, Trash2 } from 'lucide-react';
+import { ArrowDown, Check, CheckCheck, Pencil, Smile, Trash2 } from 'lucide-react';
 import Avatar from './Avatar.jsx';
+import { REACTIONS, groupReactions } from '../lib/reactions';
 
 const EASE = [0.22, 1, 0.36, 1];
 
@@ -22,7 +23,8 @@ const dayLabel = (d) => {
 };
 
 export default function MessageList({
-   messages, loading, error, onRetry, conversationId, myId, roomName, isDm, onEdit, onDelete, onHide, readAt,
+  messages, loading, error, onRetry, conversationId, myId, roomName, isDm,
+  onEdit, onDelete, onHide, onReact, readAt,
 }) {
   const scroller = useRef(null);
   const nearBottom = useRef(true);
@@ -31,6 +33,7 @@ export default function MessageList({
   const [editingId, setEditingId] = useState(null);
   const [draft, setDraft] = useState('');
   const [confirmId, setConfirmId] = useState(null);
+  const [pickerId, setPickerId] = useState(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState('');
 
@@ -40,6 +43,7 @@ export default function MessageList({
     setUnseen(0);
     setEditingId(null);
     setConfirmId(null);
+    setPickerId(null);
     setActionError('');
   }, [conversationId]);
 
@@ -63,6 +67,19 @@ export default function MessageList({
     return () => clearTimeout(t);
   }, [actionError]);
 
+  // Close the reaction picker on outside click or Escape
+  useEffect(() => {
+    if (!pickerId) return undefined;
+    const close = (e) => { if (!e.target.closest('.picker, .react-btn')) setPickerId(null); };
+    const esc = (e) => { if (e.key === 'Escape') setPickerId(null); };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('pointerdown', close);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [pickerId]);
+
   const onScroll = () => {
     const el = scroller.current;
     nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
@@ -76,6 +93,7 @@ export default function MessageList({
 
   const startEdit = (m) => {
     setConfirmId(null);
+    setPickerId(null);
     setActionError('');
     setDraft(m.text);
     setEditingId(m._id);
@@ -104,6 +122,12 @@ export default function MessageList({
   };
   const deleteForMe = (m) => run(onHide, m, 'Could not delete the message');
   const deleteForEveryone = (m) => run(onDelete, m, 'Could not delete the message');
+
+  const react = async (m, key) => {
+    setPickerId(null);
+    const res = await onReact(m._id, key);
+    if (!res.ok) setActionError(res.error || 'Could not react');
+  };
 
   const setupEditor = (el) => {
     if (!el || el.dataset.ready) return;
@@ -150,6 +174,7 @@ export default function MessageList({
               const confirming = confirmId === m._id;
               const canEdit = mine && !m.deleted && !editing;
               const canEveryone = mine && !m.deleted;
+              const reactions = m.deleted ? [] : groupReactions(m.reactions, myId);
 
               return (
                 <Fragment key={m._id}>
@@ -167,7 +192,7 @@ export default function MessageList({
                     )}
 
                     {!editing && (
-                      <div className={`msg-actions ${confirming ? 'confirm' : ''}`}>
+                      <div className={`msg-actions ${confirming ? 'confirm' : ''} ${pickerId === m._id ? 'open' : ''}`}>
                         {confirming ? (
                           <>
                             <span>Delete?</span>
@@ -181,6 +206,26 @@ export default function MessageList({
                           </>
                         ) : (
                           <>
+                            {!m.deleted && (
+                              <span className="react-wrap">
+                                <button
+                                  className="act-icon react-btn"
+                                  onClick={() => setPickerId(pickerId === m._id ? null : m._id)}
+                                  aria-label="Add reaction"
+                                >
+                                  <Smile size={14} />
+                                </button>
+                                {pickerId === m._id && (
+                                  <span className="picker" role="menu">
+                                    {REACTIONS.map((r) => (
+                                      <button key={r.key} onClick={() => react(m, r.key)} aria-label={r.label} title={r.label}>
+                                        {r.emoji}
+                                      </button>
+                                    ))}
+                                  </span>
+                                )}
+                              </span>
+                            )}
                             {canEdit && (
                               <button className="act-icon" onClick={() => startEdit(m)} aria-label="Edit message">
                                 <Pencil size={14} />
@@ -188,7 +233,7 @@ export default function MessageList({
                             )}
                             <button
                               className="act-icon"
-                              onClick={() => { setEditingId(null); setConfirmId(m._id); }}
+                              onClick={() => { setEditingId(null); setPickerId(null); setConfirmId(m._id); }}
                               aria-label="Delete message"
                             >
                               <Trash2 size={14} />
@@ -248,6 +293,23 @@ export default function MessageList({
                             )
                           )}
                         </span>
+                      )}
+
+                      {!editing && reactions.length > 0 && (
+                        <div className="reacts">
+                          {reactions.map((g) => (
+                            <button
+                              key={g.key}
+                              className={`react-chip ${g.mine ? 'mine' : ''}`}
+                              onClick={() => react(m, g.key)}
+                              title={g.label}
+                              aria-label={`${g.label}: ${g.count}${g.mine ? ', you reacted' : ''}`}
+                            >
+                              <span>{g.emoji}</span>
+                              <b>{g.count}</b>
+                            </button>
+                          ))}
+                        </div>
                       )}
                     </div>
                   </motion.div>
