@@ -13,6 +13,7 @@ import NewMessageModal from '../components/NewMessageModal.jsx';
 import CommandPalette from '../components/CommandPalette.jsx';
 import { unlockAudio, isMuted, setMuted, playIncoming } from '../lib/sound';
 import './chat.css';
+import { enable, disable, isEnabled } from '../lib/notify';
 
 export default function Chat() {
   const { user, logout } = useAuth();
@@ -22,6 +23,26 @@ export default function Chat() {
   const [showDm, setShowDm] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
     const [muted, setMutedState] = useState(isMuted);
+      const [notify, setNotify] = useState(isEnabled);
+  const [note, setNote] = useState('');
+
+  useEffect(() => {
+    if (!note) return undefined;
+    const t = setTimeout(() => setNote(''), 7000);
+    return () => clearTimeout(t);
+  }, [note]);
+
+  const toggleNotify = async () => {
+    if (notify) {
+      disable();
+      setNotify(false);
+      return;
+    }
+    const result = await enable();
+    if (result === 'granted') setNotify(true);
+    else if (result === 'unsupported') setNote("This browser doesn't support notifications.");
+    else setNote('Notifications are blocked. Click the lock icon next to the address bar and allow them.');
+  };
 
   useEffect(() => {
     window.addEventListener('pointerdown', unlockAudio);
@@ -90,6 +111,8 @@ export default function Chat() {
           unread={chat.unread}
           muted={muted}
           onToggleSound={toggleSound}
+                    notify={notify}
+          onToggleNotify={toggleNotify}
           last={chat.last}
           online={chat.online}
           open={navOpen}
@@ -131,6 +154,7 @@ export default function Chat() {
               {chat.status === 'error' ? "Can't reach the server. Retrying…" : 'Connecting…'}
             </div>
           )}
+                    {note && <div className="conn-banner" role="status">{note}</div>}
 
           <MessageList
             conversationId={chat.activeId}

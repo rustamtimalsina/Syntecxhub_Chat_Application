@@ -184,3 +184,4 @@
 .react-chip b { font-weight: 600; }
 .react-chip:hover { transform: translateY(-1px); }
 .react-chip.mine { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 22%, var(--surface-1)); color: var(--text); }
+.sb-foot { gap: 6px; }

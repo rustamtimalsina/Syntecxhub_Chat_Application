@@ -2,14 +2,14 @@ import { motion } from 'motion/react';
 import Avatar from './Avatar.jsx';
 import ThemeToggle from './ThemeToggle.jsx';
 import { otherMember } from '../lib/convo';
-import { Plus, LogOut, X, Search, Volume2, VolumeX } from 'lucide-react';
+import { Plus, LogOut, X, Search, Volume2, VolumeX, Bell, BellOff } from 'lucide-react';
 
 const pad = (n) => String(n + 1).padStart(2, '0');
 const GLOW = { type: 'spring', stiffness: 520, damping: 42 };
 
 export default function Sidebar({
-  user, conversations, activeId, unread, last, online, open,muted,
-  onSelect, onNewRoom, onNewDm, onSearch, onLogout, onClose,onToggleSound,
+  user, conversations, activeId, unread, last, online, open, muted, notify,
+  onSelect, onNewRoom, onNewDm, onSearch, onToggleSound, onToggleNotify, onLogout, onClose,
 }) {
   const channels = conversations.filter((c) => c.type === 'channel');
   const dms = conversations
@@ -105,6 +105,15 @@ export default function Sidebar({
           <strong>{user.name}</strong>
           <span>Online</span>
         </div>
+                <button
+          className="icon-btn"
+          onClick={onToggleNotify}
+          aria-label={notify ? 'Turn desktop notifications off' : 'Turn desktop notifications on'}
+          title={notify ? 'Notifications on' : 'Notifications off'}
+        >
+          {notify ? <Bell size={18} /> : <BellOff size={18} />}
+        </button>
+
                 <button
           className="icon-btn"
           onClick={onToggleSound}

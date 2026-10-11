@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import api from '../lib/api';
 import { playIncoming, playSent } from '../lib/sound';
+import { showNotification } from '../lib/notify';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || undefined;
 
@@ -37,6 +38,7 @@ export default function useChat(user, onAuthError) {
     const messagesRef = useRef({});
   useEffect(() => { messagesRef.current = messages; }, [messages]);
     const convosRef = useRef([]);
+      const selectRef = useRef(null);
   useEffect(() => { convosRef.current = conversations; }, [conversations]);
 
   const markRead = useCallback((cid) => {
@@ -126,6 +128,16 @@ export default function useChat(user, onAuthError) {
         setUnread((prev) => ({ ...prev, [cid]: (prev[cid] || 0) + 1 }));
       }
       dropTyping(cid, msg.sender._id);
+            if (msg.sender._id !== user._id && !msg.deleted) {
+        const convo = convosRef.current.find((c) => c._id === cid);
+        const room = convo?.type === 'channel' ? ` in #${convo.name}` : '';
+        showNotification({
+          title: `${msg.sender.name}${room}`,
+          body: msg.text.length > 140 ? `${msg.text.slice(0, 140)}…` : msg.text,
+          tag: cid,
+          onClick: () => selectRef.current?.(cid),
+        });
+      }
             if (cid === activeRef.current && msg.sender._id !== user._id) markRead(cid);
     });
     socket.on('message:updated', (msg) => {
@@ -202,6 +214,7 @@ export default function useChat(user, onAuthError) {
     setActiveId(id);
     setUnread((prev) => (prev[id] ? { ...prev, [id]: 0 } : prev));
   }, []);
+    useEffect(() => { selectRef.current = select; }, [select]);
 
   const reloadHistory = useCallback(() => {
     loadedRef.current.delete(activeRef.current);
