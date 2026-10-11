@@ -172,6 +172,21 @@ export default function useChat(user, onAuthError) {
         };
       })
     );
+        // Someone changed their name or color: update it everywhere, live
+    socket.on('user:updated', (u) => {
+      const fix = (s) => (s && String(s._id) === String(u._id) ? { ...s, name: u.name, color: u.color } : s);
+      setConversations((prev) =>
+        prev.map((c) => (c.members?.length ? { ...c, members: c.members.map(fix) } : c))
+      );
+      setMessages((prev) =>
+        Object.fromEntries(
+          Object.entries(prev).map(([cid, list]) => [cid, list.map((m) => ({ ...m, sender: fix(m.sender) }))])
+        )
+      );
+      setLast((prev) =>
+        Object.fromEntries(Object.entries(prev).map(([cid, m]) => [cid, m ? { ...m, sender: fix(m.sender) } : m]))
+      );
+    });
     socket.on('typing', ({ conversationId, isTyping, user: u }) => {
       if (!isTyping) return dropTyping(conversationId, u._id);
       setTyping((prev) => ({

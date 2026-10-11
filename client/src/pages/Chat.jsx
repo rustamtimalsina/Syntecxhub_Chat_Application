@@ -14,6 +14,7 @@ import CommandPalette from '../components/CommandPalette.jsx';
 import { unlockAudio, isMuted, setMuted, playIncoming } from '../lib/sound';
 import './chat.css';
 import { enable, disable, isEnabled } from '../lib/notify';
+import SettingsModal from '../components/SettingsModal.jsx';
 
 export default function Chat() {
   const { user, logout } = useAuth();
@@ -22,6 +23,7 @@ export default function Chat() {
   const [showNew, setShowNew] = useState(false);
   const [showDm, setShowDm] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
     const [muted, setMutedState] = useState(isMuted);
       const [notify, setNotify] = useState(isEnabled);
   const [note, setNote] = useState('');
@@ -122,6 +124,7 @@ export default function Chat() {
           onSearch={() => { setShowPalette(true); setNavOpen(false); }}
           onLogout={logout}
           onClose={() => setNavOpen(false)}
+                    onOpenSettings={() => { setShowSettings(true); setNavOpen(false); }}
         />
         {navOpen && <div className="scrim" onClick={() => setNavOpen(false)} />}
 
@@ -200,6 +203,9 @@ export default function Chat() {
               onOpenDm={chat.openDm}
               onClose={() => setShowPalette(false)}
             />
+          )}
+          {showSettings && (
+            <SettingsModal key="settings" user={user} onClose={() => setShowSettings(false)} />
           )}
         </AnimatePresence>
       </div>

@@ -185,3 +185,18 @@
 .react-chip:hover { transform: translateY(-1px); }
 .react-chip.mine { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 22%, var(--surface-1)); color: var(--text); }
 .sb-foot { gap: 6px; }
+/* ---------- Profile settings ---------- */
+.sb-profile { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; padding: 4px 6px; border: 0; border-radius: 10px; background: transparent; text-align: left; cursor: pointer; transition: background 0.2s; }
+.sb-profile:hover { background: var(--surface-2); }
+.modal.settings { max-width: 440px; max-height: 92vh; overflow-y: auto; }
+.settings-sec { display: grid; gap: 14px; }
+.settings-sec h4 { margin: 0; font-family: var(--font-display); font-size: 1.1rem; }
+.settings-preview { display: flex; align-items: center; gap: 14px; }
+.settings-preview strong { display: block; font-size: 1.05rem; }
+.settings-preview small { color: var(--text-3); }
+.swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+.swatch { display: grid; place-items: center; width: 34px; height: 34px; border: 2px solid transparent; border-radius: 50%; color: #12100e; cursor: pointer; transition: transform 0.15s var(--ease); }
+.swatch:hover { transform: scale(1.1); }
+.swatch.on { border-color: var(--text); box-shadow: 0 0 0 3px var(--surface-1) inset; }
+.divider { height: 1px; background: var(--line); }
+.ok-msg { margin: 0; color: var(--success); font-size: 0.9rem; }

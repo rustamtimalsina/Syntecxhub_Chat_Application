@@ -9,7 +9,7 @@ const GLOW = { type: 'spring', stiffness: 520, damping: 42 };
 
 export default function Sidebar({
   user, conversations, activeId, unread, last, online, open, muted, notify,
-  onSelect, onNewRoom, onNewDm, onSearch, onToggleSound, onToggleNotify, onLogout, onClose,
+  onSelect, onNewRoom, onNewDm, onSearch, onToggleSound, onToggleNotify, onOpenSettings, onLogout, onClose,
 }) {
   const channels = conversations.filter((c) => c.type === 'channel');
   const dms = conversations
@@ -100,11 +100,13 @@ export default function Sidebar({
       </nav>
 
       <div className="sb-foot">
-        <Avatar name={user.name} color={user.color} size={36} />
-        <div className="sb-me">
-          <strong>{user.name}</strong>
-          <span>Online</span>
-        </div>
+        <button className="sb-profile" onClick={onOpenSettings} aria-label="Open profile settings" title="Profile settings">
+          <Avatar name={user.name} color={user.color} size={36} />
+          <span className="sb-me">
+            <strong>{user.name}</strong>
+            <span>Online</span>
+          </span>
+        </button>
                 <button
           className="icon-btn"
           onClick={onToggleNotify}
