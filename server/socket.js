@@ -45,7 +45,7 @@ module.exports = function setupSocket(io) {
 
     // 4. Send a message
     const sent = [];
-    socket.on('message:send', async ({ conversationId, text } = {}, ack = () => {}) => {
+        socket.on('message:send', async ({ conversationId, text, replyTo } = {}, ack = () => {}) => {
       try {
         const now = Date.now();
         while (sent.length && now - sent[0] > 5000) sent.shift();
@@ -58,13 +58,24 @@ module.exports = function setupSocket(io) {
         if (!socket.rooms.has(room(conversationId))) {
           return ack({ ok: false, error: 'You are not part of this conversation' });
         }
-
+                let replyId = null;
+        if (replyTo) {
+          const original = mongoose.isValidObjectId(replyTo)
+            ? await Message.findOne({ _id: replyTo, conversation: conversationId }).select('_id')
+            : null;
+          if (!original) return ack({ ok: false, error: 'The original message was not found' });
+          replyId = original._id;
+        }
         const msg = await Message.create({
           conversation: conversationId,
           sender: socket.user._id,
           text: clean,
+          replyTo: replyId,
         });
-        await msg.populate('sender', 'name color');
+                await msg.populate([
+          { path: 'sender', select: 'name color' },
+          { path: 'replyTo', select: 'text deleted sender', populate: { path: 'sender', select: 'name color' } },
+        ]);
         io.to(room(conversationId)).emit('message:new', msg);
         ack({ ok: true });
       } catch {

@@ -4,6 +4,8 @@ import { Menu } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import useChat from '../hooks/useChat.js';
 import { otherMember } from '../lib/convo';
+import { unlockAudio, isMuted, setMuted, playIncoming } from '../lib/sound';
+import { enable, disable, isEnabled } from '../lib/notify';
 import Avatar from '../components/Avatar.jsx';
 import Sidebar from '../components/Sidebar.jsx';
 import MessageList from '../components/MessageList.jsx';
@@ -11,41 +13,33 @@ import Composer from '../components/Composer.jsx';
 import NewRoomModal from '../components/NewRoomModal.jsx';
 import NewMessageModal from '../components/NewMessageModal.jsx';
 import CommandPalette from '../components/CommandPalette.jsx';
-import { unlockAudio, isMuted, setMuted, playIncoming } from '../lib/sound';
-import './chat.css';
-import { enable, disable, isEnabled } from '../lib/notify';
 import SettingsModal from '../components/SettingsModal.jsx';
+import './chat.css';
 
 export default function Chat() {
   const { user, logout } = useAuth();
   const chat = useChat(user, logout);
+
   const [navOpen, setNavOpen] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showDm, setShowDm] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-    const [muted, setMutedState] = useState(isMuted);
-      const [notify, setNotify] = useState(isEnabled);
+  const [replyTo, setReplyTo] = useState(null);
+  const [muted, setMutedState] = useState(isMuted);
+  const [notify, setNotify] = useState(isEnabled);
   const [note, setNote] = useState('');
 
-  useEffect(() => {
-    if (!note) return undefined;
-    const t = setTimeout(() => setNote(''), 7000);
-    return () => clearTimeout(t);
-  }, [note]);
+  // A reply belongs to one chat, so clear it when you switch chats
+  useEffect(() => { setReplyTo(null); }, [chat.activeId]);
 
-  const toggleNotify = async () => {
-    if (notify) {
-      disable();
-      setNotify(false);
-      return;
-    }
-    const result = await enable();
-    if (result === 'granted') setNotify(true);
-    else if (result === 'unsupported') setNote("This browser doesn't support notifications.");
-    else setNote('Notifications are blocked. Click the lock icon next to the address bar and allow them.');
+  const sendMessage = async (text) => {
+    const res = await chat.send(text, replyTo?._id);
+    if (res.ok) setReplyTo(null);
+    return res;
   };
 
+  // Browsers only allow sound after a click or keypress
   useEffect(() => {
     window.addEventListener('pointerdown', unlockAudio);
     window.addEventListener('keydown', unlockAudio);
@@ -65,6 +59,26 @@ export default function Chat() {
     }
   };
 
+  // Notice at the top that clears itself
+  useEffect(() => {
+    if (!note) return undefined;
+    const t = setTimeout(() => setNote(''), 7000);
+    return () => clearTimeout(t);
+  }, [note]);
+
+  const toggleNotify = async () => {
+    if (notify) {
+      disable();
+      setNotify(false);
+      return;
+    }
+    const result = await enable();
+    if (result === 'granted') setNotify(true);
+    else if (result === 'unsupported') setNote("This browser doesn't support notifications.");
+    else setNote('Notifications are blocked. Click the lock icon next to the address bar and allow them.');
+  };
+
+  // Ctrl+K opens the quick switcher
   useEffect(() => {
     const onKey = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
@@ -81,7 +95,7 @@ export default function Chat() {
   const isDm = active?.type === 'dm';
   const other = isDm ? otherMember(active, user._id) : null;
   const otherOnline = other ? chat.online.has(String(other._id)) : false;
-    const otherReadAt = other ? chat.reads[chat.activeId]?.[String(other._id)] : null;
+  const otherReadAt = other ? chat.reads[chat.activeId]?.[String(other._id)] : null;
   const title = isDm ? other?.name || 'Chat' : active?.name;
   const index = channels.findIndex((c) => c._id === chat.activeId);
   const typingNames = Object.entries(chat.typing[chat.activeId] || {})
@@ -111,20 +125,20 @@ export default function Chat() {
           conversations={chat.conversations}
           activeId={chat.activeId}
           unread={chat.unread}
-          muted={muted}
-          onToggleSound={toggleSound}
-                    notify={notify}
-          onToggleNotify={toggleNotify}
           last={chat.last}
           online={chat.online}
           open={navOpen}
+          muted={muted}
+          notify={notify}
           onSelect={select}
           onNewRoom={() => { setShowNew(true); setNavOpen(false); }}
           onNewDm={() => { setShowDm(true); setNavOpen(false); }}
           onSearch={() => { setShowPalette(true); setNavOpen(false); }}
+          onToggleSound={toggleSound}
+          onToggleNotify={toggleNotify}
+          onOpenSettings={() => { setShowSettings(true); setNavOpen(false); }}
           onLogout={logout}
           onClose={() => setNavOpen(false)}
-                    onOpenSettings={() => { setShowSettings(true); setNavOpen(false); }}
         />
         {navOpen && <div className="scrim" onClick={() => setNavOpen(false)} />}
 
@@ -157,7 +171,7 @@ export default function Chat() {
               {chat.status === 'error' ? "Can't reach the server. Retrying…" : 'Connecting…'}
             </div>
           )}
-                    {note && <div className="conn-banner" role="status">{note}</div>}
+          {note && <div className="conn-banner" role="status">{note}</div>}
 
           <MessageList
             conversationId={chat.activeId}
@@ -166,20 +180,23 @@ export default function Chat() {
             error={chat.historyError}
             onRetry={chat.reloadHistory}
             myId={user._id}
+            roomName={title}
+            isDm={isDm}
+            readAt={otherReadAt}
             onEdit={chat.editMessage}
             onDelete={chat.deleteMessage}
             onHide={chat.hideMessage}
             onReact={chat.reactToMessage}
-            roomName={title}
-            isDm={isDm}
-            readAt={otherReadAt}
+            onReply={setReplyTo}
           />
 
           <Composer
             key={chat.activeId}
             roomName={title}
             isDm={isDm}
-            onSend={chat.send}
+            onSend={sendMessage}
+            replyTo={replyTo}
+            onCancelReply={() => setReplyTo(null)}
             onTyping={chat.sendTyping}
             typingNames={typingNames}
             disabled={!chat.activeId}
@@ -204,9 +221,7 @@ export default function Chat() {
               onClose={() => setShowPalette(false)}
             />
           )}
-          {showSettings && (
-            <SettingsModal key="settings" user={user} onClose={() => setShowSettings(false)} />
-          )}
+          {showSettings && <SettingsModal key="settings" onClose={() => setShowSettings(false)} />}
         </AnimatePresence>
       </div>
     </MotionConfig>

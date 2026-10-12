@@ -200,3 +200,17 @@
 .swatch.on { border-color: var(--text); box-shadow: 0 0 0 3px var(--surface-1) inset; }
 .divider { height: 1px; background: var(--line); }
 .ok-msg { margin: 0; color: var(--success); font-size: 0.9rem; }
+/* ---------- Replies ---------- */
+.reply-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; padding: 8px 8px 8px 12px; border-left: 3px solid var(--accent); border-radius: 10px; background: var(--surface-2); }
+.reply-bar div { display: grid; min-width: 0; }
+.reply-bar strong { font-size: 0.8rem; color: var(--accent-text); }
+.reply-bar span { overflow: hidden; color: var(--text-2); font-size: 0.85rem; text-overflow: ellipsis; white-space: nowrap; }
+.quote { display: grid; width: 100%; margin-bottom: 6px; padding: 6px 10px; border: 0; border-left: 3px solid var(--accent); border-radius: 8px; background: rgba(0, 0, 0, 0.16); color: inherit; text-align: left; cursor: pointer; }
+.msg.mine .quote { background: rgba(26, 17, 0, 0.14); border-left-color: rgba(26, 17, 0, 0.55); }
+.quote b { font-size: 0.75rem; opacity: 0.85; }
+.quote span { overflow: hidden; font-size: 0.85rem; opacity: 0.85; text-overflow: ellipsis; white-space: nowrap; }
+.msg.flash .bubble { animation: flash 1.4s ease; }
+@keyframes flash {
+  0%, 55% { box-shadow: 0 0 0 2px var(--bg), 0 0 0 5px var(--text); transform: scale(1.02); }
+  100% { box-shadow: 0 0 0 2px transparent, 0 0 0 5px transparent; transform: scale(1); }
+}

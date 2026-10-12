@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import { SendHorizonal } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { SendHorizonal, X } from 'lucide-react';
 
 const typingText = (names) => {
   if (names.length === 1) return `${names[0]} is typing`;
@@ -7,13 +7,14 @@ const typingText = (names) => {
   return 'Several people are typing';
 };
 
-export default function Composer({ roomName, isDm, onSend, onTyping, typingNames, disabled }) {
+export default function Composer({ roomName, isDm, onSend, onTyping, typingNames, disabled, replyTo, onCancelReply }) {
   const [text, setText] = useState('');
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const ref = useRef(null);
   const stopTimer = useRef(null);
   const isTyping = useRef(false);
+    useEffect(() => { if (replyTo) ref.current?.focus(); }, [replyTo]);
 
   const stopTyping = () => {
     clearTimeout(stopTimer.current);
@@ -53,6 +54,7 @@ export default function Composer({ roomName, isDm, onSend, onTyping, typingNames
   };
 
   const onKeyDown = (e) => {
+        if (e.key === 'Escape' && replyTo) onCancelReply();
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       submit();
@@ -72,6 +74,17 @@ export default function Composer({ roomName, isDm, onSend, onTyping, typingNames
             </>
           )}
         </div>
+                {replyTo && (
+          <div className="reply-bar">
+            <div>
+              <strong>Replying to {replyTo.sender.name}</strong>
+              <span>{replyTo.text}</span>
+            </div>
+            <button className="icon-btn sm" onClick={onCancelReply} aria-label="Cancel reply">
+              <X size={16} />
+            </button>
+          </div>
+        )}
 
         <div className="composer-box">
           <textarea

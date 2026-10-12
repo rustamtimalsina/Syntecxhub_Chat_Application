@@ -115,7 +115,10 @@ router.get('/:id/messages', async (req, res) => {
     const messages = await Message.find(filter)
       .sort({ createdAt: -1 })
       .limit(50)
-      .populate('sender', 'name color');
+            .populate([
+        { path: 'sender', select: 'name color' },
+        { path: 'replyTo', select: 'text deleted sender', populate: { path: 'sender', select: 'name color' } },
+      ]);
     res.json(messages.reverse());
   } catch (err) {
     res.status(500).json({ message: err.message });

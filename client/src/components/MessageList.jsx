@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowDown, Check, CheckCheck, Pencil, Smile, Trash2 } from 'lucide-react';
+import { ArrowDown, Check, CheckCheck, Pencil, Reply, Smile, Trash2 } from 'lucide-react';
 import Avatar from './Avatar.jsx';
 import { REACTIONS, groupReactions } from '../lib/reactions';
 
@@ -24,7 +24,7 @@ const dayLabel = (d) => {
 
 export default function MessageList({
   messages, loading, error, onRetry, conversationId, myId, roomName, isDm,
-  onEdit, onDelete, onHide, onReact, readAt,
+   onEdit, onDelete, onHide, onReact, onReply, readAt,
 }) {
   const scroller = useRef(null);
   const nearBottom = useRef(true);
@@ -128,6 +128,13 @@ export default function MessageList({
     const res = await onReact(m._id, key);
     if (!res.ok) setActionError(res.error || 'Could not react');
   };
+    const jumpTo = (id) => {
+    const el = document.getElementById(`m-${id}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 1400);
+  };
 
   const setupEditor = (el) => {
     if (!el || el.dataset.ready) return;
@@ -180,6 +187,7 @@ export default function MessageList({
                 <Fragment key={m._id}>
                   {newDay && <div className="day">{dayLabel(m.createdAt)}</div>}
                   <motion.div
+                  id={`m-${m._id}`}
                     className={`msg ${mine ? 'mine' : ''} ${first ? 'first' : ''} ${confirming ? 'confirming' : ''}`}
                     initial={fresh ? { opacity: 0, y: 12, scale: 0.98 } : false}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -206,6 +214,11 @@ export default function MessageList({
                           </>
                         ) : (
                           <>
+                                                      {!m.deleted && (
+                              <button className="act-icon" onClick={() => onReply(m)} aria-label="Reply">
+                                <Reply size={14} />
+                              </button>
+                            )}
                             {!m.deleted && (
                               <span className="react-wrap">
                                 <button
@@ -245,7 +258,12 @@ export default function MessageList({
 
                     <div className={`bubble ${editing ? 'editing' : ''} ${m.deleted ? 'gone' : ''}`}>
                       {!mine && first && !isDm && <span className="msg-name">{m.sender.name}</span>}
-
+                                            {m.replyTo && !m.deleted && (
+                        <button className="quote" onClick={() => jumpTo(m.replyTo._id)}>
+                          <b>{String(m.replyTo.sender?._id) === String(myId) ? 'You' : m.replyTo.sender?.name}</b>
+                          <span>{m.replyTo.deleted ? 'This message was deleted' : m.replyTo.text}</span>
+                        </button>
+                      )}
                       {m.deleted ? (
                         <span className="msg-text gone">This message was deleted</span>
                       ) : editing ? (

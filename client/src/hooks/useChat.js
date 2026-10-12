@@ -140,12 +140,21 @@ export default function useChat(user, onAuthError) {
       }
             if (cid === activeRef.current && msg.sender._id !== user._id) markRead(cid);
     });
-    socket.on('message:updated', (msg) => {
+       socket.on('message:updated', (msg) => {
       const cid = msg.conversation;
       setMessages((prev) => {
         const list = prev[cid];
         if (!list) return prev;
-        return { ...prev, [cid]: list.map((m) => (m._id === msg._id ? msg : m)) };
+        return {
+          ...prev,
+          [cid]: list.map((m) => {
+            if (m._id === msg._id) return { ...msg, replyTo: m.replyTo };
+            if (m.replyTo?._id === msg._id) {
+              return { ...m, replyTo: { ...m.replyTo, text: msg.text, deleted: msg.deleted } };
+            }
+            return m;
+          }),
+        };
       });
       setLast((prev) => (prev[cid]?._id === msg._id ? { ...prev, [cid]: msg } : prev));
     });
@@ -236,12 +245,12 @@ export default function useChat(user, onAuthError) {
     setHistoryKey((k) => k + 1);
   }, []);
 
-  const send = useCallback((text) => new Promise((resolve) => {
+  const send = useCallback((text, replyTo) => new Promise((resolve) => {
     const socket = socketRef.current;
     if (!socket?.connected) return resolve({ ok: false, error: 'Not connected yet. Reconnecting…' });
     socket.timeout(8000).emit(
       'message:send',
-      { conversationId: activeRef.current, text },
+            { conversationId: activeRef.current, text, replyTo },
       (err, ack) => resolve(err ? { ok: false, error: 'The server took too long. Try again.' } : ack)
     );
   }), []);
