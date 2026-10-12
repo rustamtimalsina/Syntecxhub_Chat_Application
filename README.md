@@ -24,6 +24,10 @@ A full-stack real-time chat app built with the MERN stack and Socket.io for the 
 - Read receipts (sent and seen ticks) in direct messages
 - Edit your own messages, delete for me, or delete for everyone
 - Message sounds with a saved mute setting
+- Reply to any message, with a quoted preview that jumps to the original
+- Emoji reactions, one per person per message, live for everyone
+- Desktop notifications when a message arrives while the tab is in the background
+- Profile settings: change your name, avatar color and password (name and color update live for everyone)
 
 **Interface**
 - Custom design system, with light and dark themes
@@ -101,6 +105,8 @@ Open http://localhost:5173
 | POST | /api/conversations/channels | Yes | Create a room |
 | POST | /api/conversations/dm | Yes | Start or reopen a direct message |
 | GET | /api/conversations/:id/messages | Yes | Message history |
+| PATCH | /api/auth/profile | Yes | Change name and avatar color |
+| PUT | /api/auth/password | Yes | Change password |
 
 ## Socket Events
 
@@ -113,6 +119,8 @@ Open http://localhost:5173
 | presence:list, presence:update | server to clients | Online users |
 | conversation:read | both | Read receipts |
 | conversation:created | server to clients | New rooms and chats appear live |
+| message:react, message:reacted | client to server, server to room | Emoji reactions |
+| user:updated | server to clients | Name and avatar changes appear live |
 
 ## Author
 
