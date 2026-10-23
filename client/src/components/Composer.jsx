@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { SendHorizonal, X, Image as ImageIcon, Loader2, Mic, Trash2, Check, AtSign } from 'lucide-react';
+import { SendHorizonal, X, Image as ImageIcon, Loader2, Mic, Trash2, Check } from 'lucide-react';
 import api, { uploadMedia, errorMessage } from '../lib/api';
 import Avatar from './Avatar.jsx';
 
@@ -104,12 +104,6 @@ export default function Composer({
     }
     clearTimeout(stopTimer.current);
     stopTimer.current = setTimeout(stopTyping, 2000);
-  };
-
-  const triggerMention = () => {
-    setText((prev) => (prev && !prev.endsWith(' ') ? `${prev} @` : `${prev}@`));
-    setMentionQuery('');
-    ref.current?.focus();
   };
 
   const pickMention = (user) => {
@@ -411,17 +405,6 @@ export default function Composer({
                 disabled={disabled || attachment?.uploading}
               >
                 <ImageIcon size={19} />
-              </button>
-
-              <button
-                type="button"
-                className="icon-btn composer-attach"
-                onClick={triggerMention}
-                title="Mention someone (@)"
-                aria-label="Mention user"
-                disabled={disabled}
-              >
-                <AtSign size={19} />
               </button>
 
               <button
