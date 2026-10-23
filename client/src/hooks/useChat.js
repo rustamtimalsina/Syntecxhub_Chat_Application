@@ -489,6 +489,7 @@ export default function useChat(user, onAuthError) {
     : true;
 
   return {
+    socket: socketRef.current,
     conversations,
     activeId,
     messages,

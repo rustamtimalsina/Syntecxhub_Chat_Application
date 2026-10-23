@@ -59,3 +59,43 @@ export const playIncoming = () => {
 
 // E5: one quiet tick
 export const playSent = () => play([[659.25, 0, 0.14, 0.05]]);
+let ringTimer = null;
+
+// Ringtone loop (plays a repeating soft telephone cadence)
+export const startRingtone = () => {
+  stopRingtone();
+  const ring = () => {
+    play([
+      [440, 0, 0.4, 0.08],
+      [480, 0.05, 0.4, 0.08],
+      [440, 0.6, 0.4, 0.08],
+      [480, 0.65, 0.4, 0.08],
+    ]);
+  };
+  ring();
+  ringTimer = setInterval(ring, 3200);
+};
+
+export const stopRingtone = () => {
+  if (ringTimer) {
+    clearInterval(ringTimer);
+    ringTimer = null;
+  }
+};
+
+// Connected: quick cheerful ascending chord
+export const playCallConnected = () => {
+  play([
+    [523.25, 0, 0.12, 0.08], // C5
+    [659.25, 0.1, 0.12, 0.08], // E5
+    [783.99, 0.2, 0.22, 0.1], // G5
+  ]);
+};
+
+// Ended: quick descending two-note beep
+export const playCallEnded = () => {
+  play([
+    [587.33, 0, 0.15, 0.08], // D5
+    [440, 0.14, 0.25, 0.07], // A4
+  ]);
+};

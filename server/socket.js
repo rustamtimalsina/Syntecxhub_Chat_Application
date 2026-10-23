@@ -327,8 +327,121 @@ module.exports = function setupSocket(io) {
       });
     });
 
-    // 6. Disconnect
+        // 6. WebRTC Audio & Video Calling
+    socket.on('call:initiate', ({ conversationId, isVideo } = {}, ack = () => {}) => {
+      try {
+        if (!conversationId || !socket.rooms.has(room(conversationId))) {
+          return ack({ ok: false, error: 'You are not in this conversation' });
+        }
+        const callId = `call_${conversationId}_${Date.now()}`;
+        socket.activeCallId = callId;
+        socket.activeCallConvo = conversationId;
+
+        socket.to(room(conversationId)).emit('call:incoming', {
+          callId,
+          conversationId,
+          isVideo: Boolean(isVideo),
+          caller: {
+            _id: socket.user._id,
+            name: socket.user.name,
+            color: socket.user.color,
+          },
+        });
+
+        ack({ ok: true, callId });
+      } catch (err) {
+        ack({ ok: false, error: 'Failed to initiate call' });
+      }
+    });
+
+    socket.on('call:accept', ({ callId, conversationId } = {}, ack = () => {}) => {
+      if (!conversationId || !socket.rooms.has(room(conversationId))) return ack({ ok: false });
+      socket.activeCallId = callId;
+      socket.activeCallConvo = conversationId;
+
+      socket.to(room(conversationId)).emit('call:accepted', {
+        callId,
+        conversationId,
+        user: {
+          _id: socket.user._id,
+          name: socket.user.name,
+          color: socket.user.color,
+        },
+      });
+      ack({ ok: true });
+    });
+
+    socket.on('call:reject', ({ callId, conversationId } = {}) => {
+      if (!conversationId) return;
+      socket.to(room(conversationId)).emit('call:rejected', {
+        callId,
+        conversationId,
+        user: { _id: socket.user._id, name: socket.user.name },
+      });
+    });
+
+    socket.on('call:signal', ({ callId, conversationId, signal, toUserId } = {}) => {
+      if (!callId || !signal) return;
+      const payload = {
+        callId,
+        conversationId,
+        signal,
+        fromUserId: String(socket.user._id),
+      };
+      if (toUserId) {
+        socket.to(`user:${toUserId}`).emit('call:signal', payload);
+      } else if (conversationId) {
+        socket.to(room(conversationId)).emit('call:signal', payload);
+      }
+    });
+
+    socket.on('call:ice-candidate', ({ callId, conversationId, candidate, toUserId } = {}) => {
+      if (!callId || !candidate) return;
+      const payload = {
+        callId,
+        conversationId,
+        candidate,
+        fromUserId: String(socket.user._id),
+      };
+      if (toUserId) {
+        socket.to(`user:${toUserId}`).emit('call:ice-candidate', payload);
+      } else if (conversationId) {
+        socket.to(room(conversationId)).emit('call:ice-candidate', payload);
+      }
+    });
+
+    socket.on('call:toggle-media', ({ callId, conversationId, audioMuted, videoMuted } = {}) => {
+      if (!conversationId) return;
+      socket.to(room(conversationId)).emit('call:media-toggled', {
+        callId,
+        conversationId,
+        userId: String(socket.user._id),
+        audioMuted: Boolean(audioMuted),
+        videoMuted: Boolean(videoMuted),
+      });
+    });
+
+    socket.on('call:end', ({ callId, conversationId } = {}) => {
+      socket.activeCallId = null;
+      socket.activeCallConvo = null;
+      if (conversationId) {
+        io.to(room(conversationId)).emit('call:ended', {
+          callId,
+          conversationId,
+          endedBy: String(socket.user._id),
+        });
+      }
+    });
+
+// 7. Disconnect
     socket.on('disconnect', () => {
+      if (socket.activeCallId && socket.activeCallConvo) {
+        io.to(room(socket.activeCallConvo)).emit('call:ended', {
+          callId: socket.activeCallId,
+          conversationId: socket.activeCallConvo,
+          endedBy: String(socket.user._id),
+        });
+      }
       const set = online.get(userId);
       if (!set) return;
       set.delete(socket.id);

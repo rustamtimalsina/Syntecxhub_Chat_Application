@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, MotionConfig } from 'motion/react';
-import { Menu, Users, Search as SearchIcon } from 'lucide-react';
+import { Menu, Users, Search as SearchIcon, Phone, Video } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import useChat from '../hooks/useChat.js';
 import { otherMember } from '../lib/convo';
@@ -17,11 +17,15 @@ import CommandPalette from '../components/CommandPalette.jsx';
 import SettingsModal from '../components/SettingsModal.jsx';
 import PinnedBanner from '../components/PinnedBanner.jsx';
 import MessageSearch from '../components/MessageSearch.jsx';
+import useCall from '../hooks/useCall.js';
+import IncomingCallModal from '../components/IncomingCallModal.jsx';
+import CallModal from '../components/CallModal.jsx';
 import './chat.css';
 
 export default function Chat() {
   const { user, logout } = useAuth();
   const chat = useChat(user, logout);
+  const call = useCall(chat.socket, user);
 
   const [navOpen, setNavOpen] = useState(false);
   const [showNew, setShowNew] = useState(false);
@@ -233,6 +237,28 @@ export default function Chat() {
             </div>
 
             <div className="head-actions">
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => call.startCall(chat.activeId, false, other)}
+                title="Start audio call"
+                aria-label="Start audio call"
+                disabled={call.callState !== 'idle' || !chat.activeId}
+              >
+                <Phone size={18} />
+              </button>
+
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => call.startCall(chat.activeId, true, other)}
+                title="Start video call"
+                aria-label="Start video call"
+                disabled={call.callState !== 'idle' || !chat.activeId}
+              >
+                <Video size={18} />
+              </button>
+
               <button
                 type="button"
                 className={`icon-btn ${showSearch ? 'active' : ''}`}
