@@ -240,7 +240,7 @@ export default function Chat() {
               <button
                 type="button"
                 className="icon-btn"
-                onClick={() => call.startCall(chat.activeId, false, other)}
+                onClick={() => call.startCall(chat.activeId, false, other || { name: title || 'Call', color: '#ffb547' })}
                 title="Start audio call"
                 aria-label="Start audio call"
                 disabled={call.callState !== 'idle' || !chat.activeId}
@@ -251,7 +251,7 @@ export default function Chat() {
               <button
                 type="button"
                 className="icon-btn"
-                onClick={() => call.startCall(chat.activeId, true, other)}
+                onClick={() => call.startCall(chat.activeId, true, other || { name: title || 'Call', color: '#ffb547' })}
                 title="Start video call"
                 aria-label="Start video call"
                 disabled={call.callState !== 'idle' || !chat.activeId}
@@ -371,7 +371,31 @@ export default function Chat() {
           )}
           {showSettings && <SettingsModal key="settings" onClose={() => setShowSettings(false)} />}
         </AnimatePresence>
-      </div>
+
+        {call.callState === 'incoming' && (
+          <IncomingCallModal
+            callInfo={call.callInfo}
+            onAccept={call.acceptCall}
+            onReject={call.rejectCall}
+          />
+        )}
+
+        <CallModal
+          callState={call.callState}
+          callInfo={call.callInfo}
+          localStream={call.localStream}
+          remoteStream={call.remoteStream}
+          audioMuted={call.audioMuted}
+          videoMuted={call.videoMuted}
+          isScreenSharing={call.isScreenSharing}
+          minimized={call.minimized}
+          callDuration={call.callDuration}
+          onToggleMic={call.toggleMic}
+          onToggleCamera={call.toggleCamera}
+          onToggleScreenShare={call.toggleScreenShare}
+          onToggleMinimize={() => call.setMinimized((m) => !m)}
+          onEndCall={call.endCall}
+        />      </div>
     </MotionConfig>
   );
 }

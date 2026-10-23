@@ -166,7 +166,20 @@ export default function useCall(socket, currentUser) {
     [socket, callState, currentUser, cleanup]
   );
 
-  // 2. Accept Incoming Call
+  // 2. Reject Call
+  const rejectCall = useCallback(() => {
+    const info = callInfoRef.current;
+    if (socket && info) {
+      socket.emit('call:reject', {
+        callId: info.callId,
+        conversationId: info.conversationId,
+      });
+    }
+    playCallEnded();
+    cleanup();
+  }, [socket, cleanup]);
+
+  // 3. Accept Incoming Call
   const acceptCall = useCallback(async () => {
     const info = callInfoRef.current;
     if (!socket || !info || callState !== 'incoming') return;
@@ -200,20 +213,7 @@ export default function useCall(socket, currentUser) {
       console.error('Failed to accept call:', err);
       rejectCall();
     }
-  }, [socket, callState, createPeerConnection]);
-
-  // 3. Reject Call
-  const rejectCall = useCallback(() => {
-    const info = callInfoRef.current;
-    if (socket && info) {
-      socket.emit('call:reject', {
-        callId: info.callId,
-        conversationId: info.conversationId,
-      });
-    }
-    playCallEnded();
-    cleanup();
-  }, [socket, cleanup]);
+  }, [socket, callState, createPeerConnection, rejectCall]);
 
   // 4. End Call
   const endCall = useCallback(() => {

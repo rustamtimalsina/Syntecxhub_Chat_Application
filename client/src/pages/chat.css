@@ -374,18 +374,19 @@
   position: fixed;
   top: 24px;
   right: 24px;
-  z-index: 100;
-  pointer-events: auto;
+  z-index: 99999;
+  pointer-events: none;
 }
 .incoming-call-card {
+  pointer-events: auto;
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 14px 18px;
+  padding: 16px 20px;
   border-radius: var(--r-lg);
   background: var(--surface-1);
-  border: 1px solid var(--line-strong);
-  box-shadow: var(--shadow-lg), 0 0 24px var(--accent-glow);
+  border: 1px solid var(--accent);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.75), 0 0 24px var(--accent-glow);
   min-width: 320px;
 }
 .incoming-avatar-wrap {
