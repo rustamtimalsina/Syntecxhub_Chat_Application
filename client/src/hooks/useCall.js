@@ -14,10 +14,36 @@ const ICE_SERVERS = {
   ],
 };
 
+// Safe helper to acquire media with graceful fallback
+async function getMediaStream(wantVideo) {
+  let stream = null;
+  if (wantVideo) {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+      });
+      return { stream, isVideo: true };
+    } catch (err) {
+      console.warn('Camera failed/in use, falling back to audio only:', err);
+    }
+  }
+
+  // Fallback to audio only
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    return { stream, isVideo: false };
+  } catch (err) {
+    console.warn('Microphone access failed:', err);
+    // Silent empty media stream so connection doesn't instantly die
+    return { stream: new MediaStream(), isVideo: false };
+  }
+}
+
 export default function useCall(socket, currentUser) {
-  // 'idle' | 'calling' (outgoing) | 'incoming' | 'connected'
+  // 'idle' | 'calling' | 'incoming' | 'connected'
   const [callState, setCallState] = useState('idle');
-  const [callInfo, setCallInfo] = useState(null); // { callId, conversationId, isVideo, caller, otherUser }
+  const [callInfo, setCallInfo] = useState(null);
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
   const [audioMuted, setAudioMuted] = useState(false);
@@ -32,11 +58,17 @@ export default function useCall(socket, currentUser) {
   const screenTrackRef = useRef(null);
   const durationTimerRef = useRef(null);
   const callInfoRef = useRef(null);
+  const callStateRef = useRef('idle');
   const isInitiatorRef = useRef(false);
+  const candidateQueueRef = useRef([]);
 
   useEffect(() => {
     callInfoRef.current = callInfo;
   }, [callInfo]);
+
+  useEffect(() => {
+    callStateRef.current = callState;
+  }, [callState]);
 
   // Clean up all media tracks and peer connection
   const cleanup = useCallback(() => {
@@ -54,9 +86,12 @@ export default function useCall(socket, currentUser) {
       localStreamRef.current = null;
     }
     if (pcRef.current) {
-      pcRef.current.close();
+      try {
+        pcRef.current.close();
+      } catch {}
       pcRef.current = null;
     }
+    candidateQueueRef.current = [];
     setLocalStream(null);
     setRemoteStream(null);
     setCallState('idle');
@@ -69,9 +104,41 @@ export default function useCall(socket, currentUser) {
     isInitiatorRef.current = false;
   }, []);
 
-  // Initialize WebRTC Peer Connection
+  // Reject Call
+  const rejectCall = useCallback(() => {
+    const info = callInfoRef.current;
+    if (socket && info) {
+      socket.emit('call:reject', {
+        callId: info.callId,
+        conversationId: info.conversationId,
+      });
+    }
+    playCallEnded();
+    cleanup();
+  }, [socket, cleanup]);
+
+  // End Call
+  const endCall = useCallback(() => {
+    const info = callInfoRef.current;
+    if (socket && info) {
+      socket.emit('call:end', {
+        callId: info.callId,
+        conversationId: info.conversationId,
+      });
+    }
+    playCallEnded();
+    cleanup();
+  }, [socket, cleanup]);
+
+  // Create WebRTC Peer Connection
   const createPeerConnection = useCallback(
     (callId, conversationId, targetUserId) => {
+      if (pcRef.current) {
+        try {
+          pcRef.current.close();
+        } catch {}
+      }
+
       const pc = new RTCPeerConnection(ICE_SERVERS);
       pcRef.current = pc;
 
@@ -104,11 +171,8 @@ export default function useCall(socket, currentUser) {
               setCallDuration((sec) => sec + 1);
             }, 1000);
           }
-        } else if (
-          pc.connectionState === 'disconnected' ||
-          pc.connectionState === 'failed' ||
-          pc.connectionState === 'closed'
-        ) {
+        } else if (pc.connectionState === 'failed') {
+          console.warn('WebRTC connection failed');
           cleanup();
         }
       };
@@ -128,19 +192,18 @@ export default function useCall(socket, currentUser) {
   // 1. Start Outgoing Call
   const startCall = useCallback(
     async (conversationId, isVideo = false, otherUser = null) => {
-      if (!socket || callState !== 'idle') return;
+      if (!socket || callStateRef.current !== 'idle') return;
       cleanup();
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: isVideo ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
-        });
 
-        localStreamRef.current = stream;
-        setLocalStream(stream);
-        webcamTrackRef.current = stream.getVideoTracks()[0] || null;
+      const { stream, isVideo: actualVideo } = await getMediaStream(isVideo);
+      localStreamRef.current = stream;
+      setLocalStream(stream);
+      webcamTrackRef.current = stream.getVideoTracks()[0] || null;
 
-        socket.emit('call:initiate', { conversationId, isVideo }, (res) => {
+      socket.emit(
+        'call:initiate',
+        { conversationId, isVideo: actualVideo },
+        (res) => {
           if (!res?.ok) {
             cleanup();
             return;
@@ -148,7 +211,7 @@ export default function useCall(socket, currentUser) {
           const info = {
             callId: res.callId,
             conversationId,
-            isVideo,
+            isVideo: actualVideo,
             caller: currentUser,
             otherUser,
           };
@@ -156,77 +219,41 @@ export default function useCall(socket, currentUser) {
           setCallState('calling');
           isInitiatorRef.current = true;
           startRingtone();
-        });
-      } catch (err) {
-        console.error('Failed to get user media:', err);
-        alert('Could not access microphone or camera. Please check permissions.');
-        cleanup();
-      }
+        }
+      );
     },
-    [socket, callState, currentUser, cleanup]
+    [socket, currentUser, cleanup]
   );
 
-  // 2. Reject Call
-  const rejectCall = useCallback(() => {
-    const info = callInfoRef.current;
-    if (socket && info) {
-      socket.emit('call:reject', {
-        callId: info.callId,
-        conversationId: info.conversationId,
-      });
-    }
-    playCallEnded();
-    cleanup();
-  }, [socket, cleanup]);
-
-  // 3. Accept Incoming Call
+  // 2. Accept Incoming Call
   const acceptCall = useCallback(async () => {
     const info = callInfoRef.current;
-    if (!socket || !info || callState !== 'incoming') return;
+    if (!socket || !info || callStateRef.current !== 'incoming') return;
     stopRingtone();
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: info.isVideo ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
-      });
+    // Get user media with fallback (so camera lock between tabs doesn't fail)
+    const { stream } = await getMediaStream(info.isVideo);
+    localStreamRef.current = stream;
+    setLocalStream(stream);
+    webcamTrackRef.current = stream.getVideoTracks()[0] || null;
 
-      localStreamRef.current = stream;
-      setLocalStream(stream);
-      webcamTrackRef.current = stream.getVideoTracks()[0] || null;
+    // Create PC on receiver
+    createPeerConnection(info.callId, info.conversationId, info.caller?._id);
 
-      createPeerConnection(info.callId, info.conversationId, info.caller?._id);
+    // Notify caller that receiver accepted
+    socket.emit('call:accept', {
+      callId: info.callId,
+      conversationId: info.conversationId,
+    });
 
-      socket.emit('call:accept', {
-        callId: info.callId,
-        conversationId: info.conversationId,
-      });
-
-      setCallState('connected');
-      playCallConnected();
-      if (!durationTimerRef.current) {
-        durationTimerRef.current = setInterval(() => {
-          setCallDuration((sec) => sec + 1);
-        }, 1000);
-      }
-    } catch (err) {
-      console.error('Failed to accept call:', err);
-      rejectCall();
+    setCallState('connected');
+    playCallConnected();
+    if (!durationTimerRef.current) {
+      durationTimerRef.current = setInterval(() => {
+        setCallDuration((sec) => sec + 1);
+      }, 1000);
     }
-  }, [socket, callState, createPeerConnection, rejectCall]);
-
-  // 4. End Call
-  const endCall = useCallback(() => {
-    const info = callInfoRef.current;
-    if (socket && info) {
-      socket.emit('call:end', {
-        callId: info.callId,
-        conversationId: info.conversationId,
-      });
-    }
-    playCallEnded();
-    cleanup();
-  }, [socket, cleanup]);
+  }, [socket, createPeerConnection]);
 
   // Toggle Microphone
   const toggleMic = useCallback(() => {
@@ -289,7 +316,6 @@ export default function useCall(socket, currentUser) {
         }
 
         screenTrack.onended = () => {
-          // Screen share stopped by browser toolbar
           if (webcamTrackRef.current && sender) {
             sender.replaceTrack(webcamTrackRef.current);
           }
@@ -301,7 +327,6 @@ export default function useCall(socket, currentUser) {
         console.error('Screen share cancelled/failed:', err);
       }
     } else {
-      // Revert back to webcam
       if (screenTrackRef.current) {
         screenTrackRef.current.stop();
         screenTrackRef.current = null;
@@ -322,8 +347,7 @@ export default function useCall(socket, currentUser) {
 
     // Incoming call from someone else
     const onIncoming = (data) => {
-      if (callState !== 'idle') {
-        // Already busy
+      if (callStateRef.current !== 'idle') {
         socket.emit('call:reject', {
           callId: data.callId,
           conversationId: data.conversationId,
@@ -337,7 +361,7 @@ export default function useCall(socket, currentUser) {
 
     // Call accepted by recipient
     const onAccepted = async (data) => {
-      if (callState === 'calling' && isInitiatorRef.current) {
+      if (isInitiatorRef.current) {
         stopRingtone();
         const info = callInfoRef.current || data;
         const pc = createPeerConnection(
@@ -367,19 +391,27 @@ export default function useCall(socket, currentUser) {
     const onRejected = (data) => {
       if (callInfoRef.current?.callId === data.callId) {
         playCallEnded();
-        alert(`${data.user?.name || 'The user'} declined the call.`);
         cleanup();
       }
     };
 
     // WebRTC Signal (Offer / Answer)
     const onSignal = async (data) => {
+      if (data.fromUserId === String(currentUser?._id)) return;
       const pc = pcRef.current;
-      if (!pc || data.fromUserId === String(currentUser?._id)) return;
+      if (!pc) return;
 
       try {
         if (data.signal.type === 'offer') {
           await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
+          // Drain queued ICE candidates
+          if (candidateQueueRef.current.length > 0) {
+            for (const c of candidateQueueRef.current) {
+              await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+            }
+            candidateQueueRef.current = [];
+          }
+
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           socket.emit('call:signal', {
@@ -390,6 +422,13 @@ export default function useCall(socket, currentUser) {
           });
         } else if (data.signal.type === 'answer') {
           await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
+          // Drain queued ICE candidates
+          if (candidateQueueRef.current.length > 0) {
+            for (const c of candidateQueueRef.current) {
+              await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+            }
+            candidateQueueRef.current = [];
+          }
         }
       } catch (err) {
         console.error('Error handling signal:', err);
@@ -398,13 +437,20 @@ export default function useCall(socket, currentUser) {
 
     // ICE Candidate
     const onIceCandidate = async (data) => {
+      if (data.fromUserId === String(currentUser?._id)) return;
       const pc = pcRef.current;
-      if (!pc || data.fromUserId === String(currentUser?._id)) return;
+      if (!pc) return;
+
+      if (!pc.remoteDescription || !pc.remoteDescription.type) {
+        // Queue candidates until remote description is set
+        candidateQueueRef.current.push(data.candidate);
+        return;
+      }
 
       try {
         await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
       } catch (err) {
-        console.error('Error adding ICE candidate:', err);
+        console.warn('Error adding ICE candidate:', err);
       }
     };
 
@@ -433,7 +479,6 @@ export default function useCall(socket, currentUser) {
     };
   }, [
     socket,
-    callState,
     currentUser,
     createPeerConnection,
     cleanup,

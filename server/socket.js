@@ -388,10 +388,10 @@ module.exports = function setupSocket(io) {
         signal,
         fromUserId: String(socket.user._id),
       };
-      if (toUserId) {
-        socket.to(`user:${toUserId}`).emit('call:signal', payload);
-      } else if (conversationId) {
+      if (conversationId) {
         socket.to(room(conversationId)).emit('call:signal', payload);
+      } else if (toUserId) {
+        socket.to(`user:${toUserId}`).emit('call:signal', payload);
       }
     });
 
@@ -403,10 +403,10 @@ module.exports = function setupSocket(io) {
         candidate,
         fromUserId: String(socket.user._id),
       };
-      if (toUserId) {
-        socket.to(`user:${toUserId}`).emit('call:ice-candidate', payload);
-      } else if (conversationId) {
+      if (conversationId) {
         socket.to(room(conversationId)).emit('call:ice-candidate', payload);
+      } else if (toUserId) {
+        socket.to(`user:${toUserId}`).emit('call:ice-candidate', payload);
       }
     });
 
