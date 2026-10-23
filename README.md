@@ -15,12 +15,17 @@ A full-stack real-time chat app built with the MERN stack and Socket.io for the 
 
 ## Features
 
-**Chat**
+**Chat & Messaging**
 - Real-time messaging with Socket.io, authenticated with JWT
 - Public chat channels, and users can create new ones
 - Private direct messages between two users
 - **Private multi-user group chats** with member selection, custom titles, and live syncing
-- **Media & image sharing** powered by Cloudinary with client preview, clipboard pasting, and lightbox zoom
+- **Media & image sharing** powered by Cloudinary with client preview, clipboard pasting (`Ctrl+V`), and lightbox zoom
+- **Voice notes & audio messages** recorded directly in-browser with duration tracking, speed toggle (`1x`, `1.5x`, `2x`), and custom player
+- **Pinned messages** with sticky banner in the conversation header for announcements and key notes
+- **In-chat message search** (`Ctrl+F`) with real-time keyword highlighting and jump-to-message
+- **User mentions** (`@username`) with autocomplete popover, highlighted mention tags, and dedicated notifications
+- **Rich link previews** that automatically parse URLs and generate Open Graph cards with title, description, and thumbnail
 - **Infinite scroll history pagination** that loads earlier messages seamlessly on scroll-up
 - Chat history stored in MongoDB Atlas with indexed timestamps
 - Typing indicators, online/offline presence, and unread badges
@@ -50,7 +55,7 @@ A full-stack real-time chat app built with the MERN stack and Socket.io for the 
 ## Tech Stack
 
 - **Frontend:** React 19 (Vite), React Router, Socket.io client, Motion, Three.js, Lucide icons
-- **Backend:** Node.js, Express 5, Socket.io 4, Multer, Cloudinary SDK, Redis client
+- **Backend:** Node.js, Express 5, Socket.io 4, Multer, Cloudinary SDK, Cheerio (Open Graph scraper), Redis client
 - **Database:** MongoDB Atlas with Mongoose 9
 - **Auth and security:** JWT, bcryptjs, helmet, express-rate-limit
 - **Deployment:** Vercel (client), Render (server), MongoDB Atlas (database)
@@ -66,7 +71,7 @@ React app (Vercel)  <-- REST + WebSocket -->  Express + Socket.io (Render)  <-->
 1. Users register or log in over REST and receive a JWT.
 2. The client opens a Socket.io connection and sends the token. The server verifies it before accepting the connection.
 3. On connect, the server joins the user to every public room, group, and private chat they belong to.
-4. Messages and media uploads are validated, stored in MongoDB Atlas / Cloudinary, and broadcast to the room.
+4. Messages, voice notes, and media uploads are validated, stored in MongoDB Atlas / Cloudinary, and broadcast to the room.
 
 ## Run Locally
 
@@ -87,7 +92,7 @@ MONGO_URI=your_mongodb_connection_string
 JWT_SECRET=your_secret_key
 CLIENT_URL=http://localhost:5173
 
-# Cloudinary (for media uploads)
+# Cloudinary (for media uploads & voice notes)
 CLOUDINARY_CLOUD_NAME=your_cloud_name
 CLOUDINARY_API_KEY=your_api_key
 CLOUDINARY_API_SECRET=your_api_secret
@@ -120,8 +125,10 @@ Open http://localhost:5173
 | POST | /api/conversations/dm | Yes | Start or reopen a direct message |
 | POST | /api/conversations/groups | Yes | Create a private multi-user group chat |
 | PATCH | /api/conversations/:id/members | Yes | Add, remove, or leave group members |
+| GET | /api/conversations/:id/search?q= | Yes | In-chat message search |
+| GET | /api/conversations/:id/pinned | Yes | Fetch pinned messages in conversation |
 | GET | /api/conversations/:id/messages | Yes | Message history (?before=&limit=) |
-| POST | /api/upload | Yes | Upload image/media attachment (Cloudinary) |
+| POST | /api/upload | Yes | Upload image/media/audio attachment (Cloudinary) |
 | PATCH | /api/auth/profile | Yes | Change name and avatar color |
 | PUT | /api/auth/password | Yes | Change password |
 
@@ -129,8 +136,9 @@ Open http://localhost:5173
 
 | Event | Direction | Purpose |
 |---|---|---|
-| message:send, message:new | client to server, server to room | Send and receive messages + attachments |
+| message:send, message:new | client to server, server to room | Send and receive messages, media, voice notes, mentions |
 | message:edit, message:delete, message:updated | client to server, server to room | Edit or delete for everyone |
+| message:pin, message:pinned | client to server, server to room | Pin or unpin message |
 | message:hide, message:hidden | client to server, server to my tabs | Delete for me |
 | typing | both | Typing indicator |
 | presence:list, presence:update | server to clients | Online users |

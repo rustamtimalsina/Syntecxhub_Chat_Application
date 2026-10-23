@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, MotionConfig } from 'motion/react';
-import { Menu, Users } from 'lucide-react';
+import { Menu, Users, Search as SearchIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import useChat from '../hooks/useChat.js';
 import { otherMember } from '../lib/convo';
@@ -15,6 +15,8 @@ import NewMessageModal from '../components/NewMessageModal.jsx';
 import NewGroupModal from '../components/NewGroupModal.jsx';
 import CommandPalette from '../components/CommandPalette.jsx';
 import SettingsModal from '../components/SettingsModal.jsx';
+import PinnedBanner from '../components/PinnedBanner.jsx';
+import MessageSearch from '../components/MessageSearch.jsx';
 import './chat.css';
 
 export default function Chat() {
@@ -27,6 +29,7 @@ export default function Chat() {
   const [showGroup, setShowGroup] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [replyTo, setReplyTo] = useState(null);
   const [muted, setMutedState] = useState(isMuted);
   const [notify, setNotify] = useState(isEnabled);
@@ -35,12 +38,21 @@ export default function Chat() {
   // A reply belongs to one chat, so clear it when you switch chats
   useEffect(() => {
     setReplyTo(null);
+    setShowSearch(false);
   }, [chat.activeId]);
 
-  const sendMessage = async (text, attachment) => {
-    const res = await chat.send(text, replyTo?._id, attachment);
+  const sendMessage = async (text, attachment, audio, mentions) => {
+    const res = await chat.send(text, replyTo?._id, attachment, audio, mentions);
     if (res.ok) setReplyTo(null);
     return res;
+  };
+
+  const jumpToMessage = (targetId) => {
+    const el = document.getElementById(`m-${targetId}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 1400);
   };
 
   // Browsers only allow sound after a click or keypress
@@ -59,7 +71,7 @@ export default function Chat() {
     setMutedState(next);
     if (!next) {
       unlockAudio();
-      playIncoming(); // a short preview when you turn sound back on
+      playIncoming();
     }
   };
 
@@ -82,12 +94,15 @@ export default function Chat() {
     else setNote('Notifications are blocked. Click the lock icon next to the address bar and allow them.');
   };
 
-  // Ctrl+K opens the quick switcher
+  // Ctrl+K opens the quick switcher, Ctrl+F opens in-chat search
   useEffect(() => {
     const onKey = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setShowPalette((v) => !v);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        setShowSearch((v) => !v);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -108,6 +123,17 @@ export default function Chat() {
   const typingNames = Object.entries(chat.typing[chat.activeId] || {})
     .filter(([id]) => id !== user._id)
     .map(([, name]) => name);
+
+  // Collect conversation members for mention autocomplete
+  const convoMembers = isGroup
+    ? active?.members || []
+    : isDm
+    ? other
+      ? [other]
+      : []
+    : chat.conversations
+        .flatMap((c) => c.members || [])
+        .filter((m, idx, arr) => arr.findIndex((x) => x._id === m._id) === idx);
 
   const select = (id) => {
     chat.select(id);
@@ -206,12 +232,32 @@ export default function Chat() {
               )}
             </div>
 
-            {!isDm && !isGroup && (
-              <span className="online-pill">
-                <i /> {chat.online.size} online
-              </span>
-            )}
+            <div className="head-actions">
+              <button
+                type="button"
+                className={`icon-btn ${showSearch ? 'active' : ''}`}
+                onClick={() => setShowSearch((v) => !v)}
+                title="Search messages in this conversation (Ctrl+F)"
+                aria-label="Search conversation"
+              >
+                <SearchIcon size={18} />
+              </button>
+
+              {!isDm && !isGroup && (
+                <span className="online-pill">
+                  <i /> {chat.online.size} online
+                </span>
+              )}
+            </div>
           </header>
+
+          {showSearch && (
+            <MessageSearch
+              onSearch={(q) => chat.searchMessages(chat.activeId, q)}
+              onJump={jumpToMessage}
+              onClose={() => setShowSearch(false)}
+            />
+          )}
 
           {chat.status !== 'connected' && (
             <div className="conn-banner" role="status">
@@ -219,10 +265,15 @@ export default function Chat() {
             </div>
           )}
           {note && (
-            <div className="conn-banner" role="status">
-              {note}
-            </div>
+            <div className="conn-banner" role="status">{note}</div>
           )}
+
+          {/* Pinned Messages Banner */}
+          <PinnedBanner
+            pinnedMessages={chat.pinnedMessages}
+            onJump={jumpToMessage}
+            onUnpin={(id) => chat.pinMessage(id, false)}
+          />
 
           <MessageList
             conversationId={chat.activeId}
@@ -242,6 +293,7 @@ export default function Chat() {
             onDelete={chat.deleteMessage}
             onHide={chat.hideMessage}
             onReact={chat.reactToMessage}
+            onPin={chat.pinMessage}
             onReply={setReplyTo}
           />
 
@@ -250,6 +302,7 @@ export default function Chat() {
             roomName={title}
             isDm={isDm}
             isGroup={isGroup}
+            members={convoMembers}
             onSend={sendMessage}
             replyTo={replyTo}
             onCancelReply={() => setReplyTo(null)}

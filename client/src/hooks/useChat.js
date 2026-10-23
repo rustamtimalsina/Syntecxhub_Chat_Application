@@ -16,6 +16,7 @@ export default function useChat(user, onAuthError) {
   const [conversations, setConversations] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [messages, setMessages] = useState({}); // conversationId -> messages[]
+  const [pinnedMessages, setPinnedMessages] = useState({}); // conversationId -> messages[]
   const [loadingId, setLoadingId] = useState(null);
   const [historyError, setHistoryError] = useState(false);
   const [historyKey, setHistoryKey] = useState(0);
@@ -181,7 +182,11 @@ export default function useChat(user, onAuthError) {
             : convo?.type === 'group'
             ? ` in ${convo.name}`
             : '';
-        const bodyText = msg.text || (msg.attachment ? 'Shared an attachment' : 'New message');
+        const isMentioned = msg.mentions?.some((m) => String(m._id || m) === String(user._id));
+        const bodyText =
+          (isMentioned ? 'Mentioned you: ' : '') +
+          (msg.text || (msg.audio ? '🎤 Voice message' : msg.attachment ? '🖼️ Shared an attachment' : 'New message'));
+
         showNotification({
           title: `${msg.sender.name}${roomName}`,
           body: bodyText.length > 140 ? `${bodyText.slice(0, 140)}…` : bodyText,
@@ -205,7 +210,13 @@ export default function useChat(user, onAuthError) {
             if (m.replyTo?._id === msg._id) {
               return {
                 ...m,
-                replyTo: { ...m.replyTo, text: msg.text, attachment: msg.attachment, deleted: msg.deleted },
+                replyTo: {
+                  ...m.replyTo,
+                  text: msg.text,
+                  attachment: msg.attachment,
+                  audio: msg.audio,
+                  deleted: msg.deleted,
+                },
               };
             }
             return m;
@@ -213,6 +224,38 @@ export default function useChat(user, onAuthError) {
         };
       });
       setLast((prev) => (prev[cid]?._id === msg._id ? { ...prev, [cid]: msg } : prev));
+      setPinnedMessages((prev) => {
+        const list = prev[cid];
+        if (!list) return prev;
+        return {
+          ...prev,
+          [cid]: msg.deleted || !msg.pinned
+            ? list.filter((m) => m._id !== msg._id)
+            : list.map((m) => (m._id === msg._id ? msg : m)),
+        };
+      });
+    });
+
+    socket.on('message:pinned', (msg) => {
+      const cid = msg.conversation;
+      setMessages((prev) => {
+        const list = prev[cid];
+        if (!list) return prev;
+        return {
+          ...prev,
+          [cid]: list.map((m) => (m._id === msg._id ? msg : m)),
+        };
+      });
+      setPinnedMessages((prev) => {
+        const currentList = prev[cid] || [];
+        if (msg.pinned) {
+          if (currentList.some((m) => m._id === msg._id)) {
+            return { ...prev, [cid]: currentList.map((m) => (m._id === msg._id ? msg : m)) };
+          }
+          return { ...prev, [cid]: [msg, ...currentList] };
+        }
+        return { ...prev, [cid]: currentList.filter((m) => m._id !== msg._id) };
+      });
     });
 
     socket.on('message:hidden', ({ messageId, conversationId }) => {
@@ -225,6 +268,11 @@ export default function useChat(user, onAuthError) {
       setLast((prev) =>
         prev[conversationId]?._id === messageId
           ? { ...prev, [conversationId]: rest[rest.length - 1] }
+          : prev
+      );
+      setPinnedMessages((prev) =>
+        prev[conversationId]
+          ? { ...prev, [conversationId]: prev[conversationId].filter((m) => m._id !== messageId) }
           : prev
       );
     });
@@ -247,6 +295,11 @@ export default function useChat(user, onAuthError) {
         prev.map((c) => (c.members?.length ? { ...c, members: c.members.map(fix) } : c))
       );
       setMessages((prev) =>
+        Object.fromEntries(
+          Object.entries(prev).map(([cid, list]) => [cid, list.map((m) => ({ ...m, sender: fix(m.sender) }))])
+        )
+      );
+      setPinnedMessages((prev) =>
         Object.fromEntries(
           Object.entries(prev).map(([cid, list]) => [cid, list.map((m) => ({ ...m, sender: fix(m.sender) }))])
         )
@@ -284,6 +337,7 @@ export default function useChat(user, onAuthError) {
     loadedRef.current.add(id);
     setLoadingId(id);
 
+    // Load message history
     api
       .get(`/conversations/${id}/messages`)
       .then((res) => {
@@ -300,6 +354,12 @@ export default function useChat(user, onAuthError) {
         setHistoryError(true);
       })
       .finally(() => setLoadingId((cur) => (cur === id ? null : cur)));
+
+    // Load pinned messages
+    api
+      .get(`/conversations/${id}/pinned`)
+      .then(({ data }) => setPinnedMessages((prev) => ({ ...prev, [id]: data })))
+      .catch(() => {});
   }, [activeId, historyKey]);
 
   // Load older messages (infinite scroll back)
@@ -344,15 +404,15 @@ export default function useChat(user, onAuthError) {
   }, []);
 
   const send = useCallback(
-    (text, replyTo, attachment) =>
+    (text, replyTo, attachment, audio, mentions) =>
       new Promise((resolve) => {
         const socket = socketRef.current;
         if (!socket?.connected) return resolve({ ok: false, error: 'Not connected yet. Reconnecting…' });
         socket
-          .timeout(8000)
+          .timeout(9000)
           .emit(
             'message:send',
-            { conversationId: activeRef.current, text, replyTo, attachment },
+            { conversationId: activeRef.current, text, replyTo, attachment, audio, mentions },
             (err, ack) => resolve(err ? { ok: false, error: 'The server took too long. Try again.' } : ack)
           );
       }),
@@ -372,6 +432,18 @@ export default function useChat(user, onAuthError) {
       }),
     []
   );
+
+  const pinMessage = useCallback(
+    (messageId, pinned) => request('message:pin', { messageId, pinned }),
+    [request]
+  );
+
+  const searchMessages = useCallback(async (conversationId, query) => {
+    const { data } = await api.get(`/conversations/${conversationId}/search`, {
+      params: { q: query },
+    });
+    return data;
+  }, []);
 
   const editMessage = useCallback((messageId, text) => request('message:edit', { messageId, text }), [request]);
   const deleteMessage = useCallback((messageId) => request('message:delete', { messageId }), [request]);
@@ -420,6 +492,7 @@ export default function useChat(user, onAuthError) {
     conversations,
     activeId,
     messages,
+    pinnedMessages: activeId ? pinnedMessages[activeId] || [] : [],
     loading,
     historyError,
     reloadHistory,
@@ -440,6 +513,8 @@ export default function useChat(user, onAuthError) {
     createRoom,
     openDm,
     createGroup,
+    pinMessage,
+    searchMessages,
     editMessage,
     deleteMessage,
     hideMessage,

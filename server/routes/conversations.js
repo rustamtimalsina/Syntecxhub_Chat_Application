@@ -9,6 +9,17 @@ const ReadState = require('../models/ReadState');
 
 router.use(protect);
 
+const MESSAGE_POPULATE = [
+  { path: 'sender', select: 'name color' },
+  { path: 'pinnedBy', select: 'name color' },
+  { path: 'mentions', select: 'name color' },
+  {
+    path: 'replyTo',
+    select: 'text attachment audio deleted sender',
+    populate: { path: 'sender', select: 'name color' },
+  },
+];
+
 // List: all channels plus direct messages and groups I'm part of
 router.get('/', async (req, res) => {
   try {
@@ -95,7 +106,6 @@ router.post('/dm', async (req, res) => {
     }
     await convo.populate('members', 'name color');
 
-    // Put both users' open sockets into the room and show the chat in both sidebars
     const io = req.app.get('io');
     const ids = [String(req.user._id), String(userId)];
     ids.forEach((id) => io.in(`user:${id}`).socketsJoin(`convo:${convo._id}`));
@@ -117,7 +127,6 @@ router.post('/groups', async (req, res) => {
       return res.status(400).json({ message: 'Group name must be between 2 and 40 characters' });
     }
 
-    // Filter valid unique IDs excluding caller
     const uniqueIds = [
       ...new Set(
         memberIds.filter(
@@ -164,7 +173,7 @@ router.post('/groups', async (req, res) => {
 router.patch('/:id/members', async (req, res) => {
   try {
     const { id } = req.params;
-    const { action, userId } = req.body; // action: 'add' | 'remove' | 'leave'
+    const { action, userId } = req.body;
     if (!mongoose.isValidObjectId(id) || (!['leave'].includes(action) && !mongoose.isValidObjectId(userId))) {
       return res.status(400).json({ message: 'Invalid parameters' });
     }
@@ -211,6 +220,66 @@ router.patch('/:id/members', async (req, res) => {
   }
 });
 
+// Search messages inside a conversation
+router.get('/:id/search', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const query = (req.query.q || '').trim();
+    if (!mongoose.isValidObjectId(id)) return res.status(404).json({ message: 'Conversation not found' });
+    if (!query) return res.json([]);
+
+    const convo = await Conversation.findById(id);
+    if (!convo) return res.status(404).json({ message: 'Conversation not found' });
+
+    const allowed = convo.type === 'channel' || convo.members.some((m) => m.equals(req.user._id));
+    if (!allowed) return res.status(403).json({ message: 'You are not part of this conversation' });
+
+    // Escape regex special chars
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const messages = await Message.find({
+      conversation: id,
+      text: { $regex: escaped, $options: 'i' },
+      deleted: { $ne: true },
+      hiddenFor: { $ne: req.user._id },
+    })
+      .sort({ createdAt: -1 })
+      .limit(30)
+      .populate(MESSAGE_POPULATE);
+
+    res.json(messages);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Get pinned messages for a conversation
+router.get('/:id/pinned', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) return res.status(404).json({ message: 'Conversation not found' });
+
+    const convo = await Conversation.findById(id);
+    if (!convo) return res.status(404).json({ message: 'Conversation not found' });
+
+    const allowed = convo.type === 'channel' || convo.members.some((m) => m.equals(req.user._id));
+    if (!allowed) return res.status(403).json({ message: 'You are not part of this conversation' });
+
+    const pinnedMessages = await Message.find({
+      conversation: id,
+      pinned: true,
+      deleted: { $ne: true },
+      hiddenFor: { $ne: req.user._id },
+    })
+      .sort({ pinnedAt: -1 })
+      .limit(20)
+      .populate(MESSAGE_POPULATE);
+
+    res.json(pinnedMessages);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // Message history: default limit 50, oldest first. ?before=<date> loads older ones.
 router.get('/:id/messages', async (req, res) => {
   try {
@@ -231,14 +300,7 @@ router.get('/:id/messages', async (req, res) => {
     const messages = await Message.find(filter)
       .sort({ createdAt: -1 })
       .limit(limit + 1)
-      .populate([
-        { path: 'sender', select: 'name color' },
-        {
-          path: 'replyTo',
-          select: 'text attachment deleted sender',
-          populate: { path: 'sender', select: 'name color' },
-        },
-      ]);
+      .populate(MESSAGE_POPULATE);
 
     const hasMore = messages.length > limit;
     const items = hasMore ? messages.slice(0, limit) : messages;

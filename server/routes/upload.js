@@ -5,13 +5,22 @@ const { uploadBuffer } = require('../utils/cloudinary');
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB
   fileFilter: (req, file, cb) => {
-    // Allow images and common media formats
-    if (/^image\/(jpeg|png|webp|gif|svg\+xml)|video\/mp4/.test(file.mimetype)) {
+    // Allow images, common videos, and audio clips
+    const valid =
+      /^image\/(jpeg|png|webp|gif|svg\+xml)/.test(file.mimetype) ||
+      /^video\/(mp4|webm)/.test(file.mimetype) ||
+      /^audio\/(webm|mp4|mpeg|ogg|wav|aac|x-m4a|mp3)/.test(file.mimetype);
+
+    if (valid) {
       cb(null, true);
     } else {
-      cb(new Error('Only images (JPG, PNG, GIF, WebP, SVG) and MP4 videos are allowed.'));
+      cb(
+        new Error(
+          'Supported formats: Images (JPG, PNG, GIF, WebP), Videos (MP4, WebM), and Audio (WebM, MP3, WAV, OGG, M4A).'
+        )
+      );
     }
   },
 });

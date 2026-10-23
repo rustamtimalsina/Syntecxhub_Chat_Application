@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { SendHorizonal, X, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { SendHorizonal, X, Image as ImageIcon, Loader2, Mic, Trash2, Check } from 'lucide-react';
 import { uploadMedia, errorMessage } from '../lib/api';
+import Avatar from './Avatar.jsx';
 
 const typingText = (names) => {
   if (names.length === 1) return `${names[0]} is typing`;
@@ -12,6 +13,7 @@ export default function Composer({
   roomName,
   isDm,
   isGroup,
+  members = [],
   onSend,
   onTyping,
   typingNames = [],
@@ -23,10 +25,18 @@ export default function Composer({
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const [attachment, setAttachment] = useState(null); // { file, previewUrl, uploading, data }
+  const [mentions, setMentions] = useState([]); // array of user IDs
+  const [mentionQuery, setMentionQuery] = useState(null); // string | null (when typing @...)
+  const [recording, setRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+
   const ref = useRef(null);
   const fileInputRef = useRef(null);
   const stopTimer = useRef(null);
   const isTyping = useRef(false);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const recordingTimerRef = useRef(null);
 
   useEffect(() => {
     if (replyTo) ref.current?.focus();
@@ -41,10 +51,22 @@ export default function Composer({
   };
 
   const change = (e) => {
-    setText(e.target.value);
+    const val = e.target.value;
+    setText(val);
     setError('');
     e.target.style.height = 'auto';
     e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
+
+    // Check for @mention trigger
+    const cursorPos = e.target.selectionStart;
+    const textBefore = val.slice(0, cursorPos);
+    const atMatch = textBefore.match(/@(\w*)$/);
+    if (atMatch && members.length > 0) {
+      setMentionQuery(atMatch[1].toLowerCase());
+    } else {
+      setMentionQuery(null);
+    }
+
     if (!isTyping.current) {
       isTyping.current = true;
       onTyping(true);
@@ -53,11 +75,23 @@ export default function Composer({
     stopTimer.current = setTimeout(stopTyping, 2000);
   };
 
+  const pickMention = (user) => {
+    const cursorPos = ref.current?.selectionStart || text.length;
+    const textBefore = text.slice(0, cursorPos);
+    const textAfter = text.slice(cursorPos);
+    const replaced = textBefore.replace(/@\w*$/, `@${user.name} `);
+
+    setText(replaced + textAfter);
+    setMentions((prev) => (prev.includes(user._id) ? prev : [...prev, user._id]));
+    setMentionQuery(null);
+    ref.current?.focus();
+  };
+
   const handleFileSelect = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 10 * 1024 * 1024) {
-      setError('File size must be under 10MB');
+    if (file.size > 15 * 1024 * 1024) {
+      setError('File size must be under 15MB');
       return;
     }
 
@@ -105,6 +139,71 @@ export default function Composer({
     }
   };
 
+  // --- Voice Notes Recording ---
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.start(100);
+      setRecording(true);
+      setRecordingTime(0);
+      setError('');
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime((s) => s + 1);
+      }, 1000);
+    } catch {
+      setError('Microphone access denied or not supported.');
+    }
+  };
+
+  const cancelRecording = () => {
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stream.getTracks().forEach((track) => track.stop());
+      mediaRecorderRef.current.stop();
+    }
+    clearInterval(recordingTimerRef.current);
+    setRecording(false);
+    setRecordingTime(0);
+    audioChunksRef.current = [];
+  };
+
+  const sendVoiceNote = async () => {
+    if (!mediaRecorderRef.current) return;
+    const duration = recordingTime;
+    clearInterval(recordingTimerRef.current);
+    setRecording(false);
+    setSending(true);
+
+    mediaRecorderRef.current.onstop = async () => {
+      mediaRecorderRef.current.stream.getTracks().forEach((track) => track.stop());
+      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+      const audioFile = new File([audioBlob], `voice-note-${Date.now()}.webm`, {
+        type: 'audio/webm',
+      });
+
+      try {
+        const uploaded = await uploadMedia(audioFile);
+        await onSend('', null, { url: uploaded.url, duration, publicId: uploaded.publicId });
+      } catch (err) {
+        setError(errorMessage(err));
+      } finally {
+        setSending(false);
+        setRecordingTime(0);
+        audioChunksRef.current = [];
+      }
+    };
+
+    mediaRecorderRef.current.stop();
+  };
+
   const submit = async () => {
     const clean = text.trim();
     if ((!clean && !attachment?.data) || sending || disabled || attachment?.uploading) return;
@@ -112,11 +211,12 @@ export default function Composer({
     setSending(true);
     stopTyping();
 
-    const res = await onSend(clean, attachment?.data);
+    const res = await onSend(clean, attachment?.data, null, mentions);
     setSending(false);
 
     if (res.ok) {
       setText('');
+      setMentions([]);
       removeAttachment();
       if (ref.current) ref.current.style.height = 'auto';
       ref.current?.focus();
@@ -126,12 +226,20 @@ export default function Composer({
   };
 
   const onKeyDown = (e) => {
-    if (e.key === 'Escape' && replyTo) onCancelReply();
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+    if (e.key === 'Escape') {
+      if (mentionQuery !== null) setMentionQuery(null);
+      else if (replyTo) onCancelReply();
+    }
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && mentionQuery === null) {
       e.preventDefault();
       submit();
     }
   };
+
+  const filteredMembers =
+    mentionQuery !== null
+      ? members.filter((m) => m.name.toLowerCase().includes(mentionQuery))
+      : [];
 
   const placeholder = roomName
     ? isDm
@@ -163,7 +271,10 @@ export default function Composer({
           <div className="reply-bar">
             <div>
               <strong>Replying to {replyTo.sender.name}</strong>
-              <span>{replyTo.text || (replyTo.attachment ? 'Attachment' : '')}</span>
+              <span>
+                {replyTo.text ||
+                  (replyTo.audio ? '🎤 Voice message' : replyTo.attachment ? '🖼️ Attachment' : '')}
+              </span>
             </div>
             <button className="icon-btn sm" onClick={onCancelReply} aria-label="Cancel reply">
               <X size={16} />
@@ -196,47 +307,115 @@ export default function Composer({
           </div>
         )}
 
+        {/* Mentions Autocomplete Popover */}
+        {filteredMembers.length > 0 && (
+          <div className="mentions-popover" role="listbox">
+            <div className="mentions-header">Mention a member</div>
+            {filteredMembers.slice(0, 5).map((u) => (
+              <button
+                key={u._id}
+                type="button"
+                className="mention-row"
+                onClick={() => pickMention(u)}
+              >
+                <Avatar name={u.name} color={u.color} size={22} />
+                <span className="mention-name">{u.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="composer-box">
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileSelect}
-            style={{ display: 'none' }}
-            accept="image/*,video/mp4"
-          />
-          <button
-            type="button"
-            className="icon-btn composer-attach"
-            onClick={() => fileInputRef.current?.click()}
-            title="Attach media or image"
-            aria-label="Attach file"
-            disabled={disabled || attachment?.uploading}
-          >
-            <ImageIcon size={19} />
-          </button>
+          {recording ? (
+            /* Voice Recording Interface */
+            <div className="voice-recording-bar">
+              <div className="voice-rec-indicator">
+                <span className="rec-pulse" />
+                <span className="mono">
+                  {Math.floor(recordingTime / 60)}:
+                  {recordingTime % 60 < 10 ? '0' : ''}
+                  {recordingTime % 60}
+                </span>
+                <span className="rec-label">Recording audio…</span>
+              </div>
 
-          <textarea
-            ref={ref}
-            rows={1}
-            value={text}
-            onChange={change}
-            onKeyDown={onKeyDown}
-            onPaste={handlePaste}
-            onBlur={stopTyping}
-            placeholder={placeholder}
-            maxLength={2000}
-            disabled={disabled}
-            aria-label="Message"
-          />
+              <div className="voice-rec-actions">
+                <button
+                  type="button"
+                  className="icon-btn danger"
+                  onClick={cancelRecording}
+                  title="Cancel recording"
+                  aria-label="Cancel recording"
+                >
+                  <Trash2 size={18} />
+                </button>
+                <button
+                  type="button"
+                  className="send sm"
+                  onClick={sendVoiceNote}
+                  title="Send voice note"
+                  aria-label="Send voice note"
+                >
+                  <Check size={18} />
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* Normal Text Input Interface */
+            <>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileSelect}
+                style={{ display: 'none' }}
+                accept="image/*,video/mp4"
+              />
+              <button
+                type="button"
+                className="icon-btn composer-attach"
+                onClick={() => fileInputRef.current?.click()}
+                title="Attach media or image"
+                aria-label="Attach file"
+                disabled={disabled || attachment?.uploading}
+              >
+                <ImageIcon size={19} />
+              </button>
 
-          <button
-            className="send"
-            onClick={submit}
-            disabled={!canSend}
-            aria-label="Send message"
-          >
-            {sending ? <Loader2 size={18} className="spin" /> : <SendHorizonal size={18} />}
-          </button>
+              <button
+                type="button"
+                className="icon-btn composer-attach"
+                onClick={startRecording}
+                title="Record voice note"
+                aria-label="Record voice note"
+                disabled={disabled}
+              >
+                <Mic size={19} />
+              </button>
+
+              <textarea
+                ref={ref}
+                rows={1}
+                value={text}
+                onChange={change}
+                onKeyDown={onKeyDown}
+                onPaste={handlePaste}
+                onBlur={stopTyping}
+                placeholder={placeholder}
+                maxLength={2000}
+                disabled={disabled}
+                aria-label="Message"
+              />
+
+              <button
+                className="send"
+                onClick={submit}
+                disabled={!canSend}
+                aria-label="Send message"
+              >
+                {sending ? <Loader2 size={18} className="spin" /> : <SendHorizonal size={18} />}
+              </button>
+            </>
+          )}
         </div>
         {error && <p className="composer-error" role="alert">{error}</p>}
       </div>

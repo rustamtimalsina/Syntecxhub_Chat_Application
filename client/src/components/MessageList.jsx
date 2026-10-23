@@ -1,7 +1,20 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowDown, Check, CheckCheck, Pencil, Reply, Smile, Trash2, X, Loader2 } from 'lucide-react';
+import {
+  ArrowDown,
+  Check,
+  CheckCheck,
+  Pencil,
+  Reply,
+  Smile,
+  Trash2,
+  X,
+  Loader2,
+  Pin,
+  ExternalLink,
+} from 'lucide-react';
 import Avatar from './Avatar.jsx';
+import AudioMessage from './AudioMessage.jsx';
 import { REACTIONS, groupReactions } from '../lib/reactions';
 
 const EASE = [0.22, 1, 0.36, 1];
@@ -22,6 +35,38 @@ const dayLabel = (d) => {
   });
 };
 
+const renderMessageContent = (text) => {
+  if (!text) return null;
+  // Match URLs and @Mentions
+  const tokenRegex = /(https?:\/\/[^\s<>"'{}|\\^`[\]]+|@[\w\d_]+)/gi;
+  const parts = text.split(tokenRegex);
+
+  return parts.map((part, i) => {
+    if (/^https?:\/\//i.test(part)) {
+      return (
+        <a
+          key={i}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="msg-link"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {part} <ExternalLink size={11} style={{ display: 'inline', verticalAlign: '-1px' }} />
+        </a>
+      );
+    }
+    if (/^@[\w\d_]+/i.test(part)) {
+      return (
+        <span key={i} className="mention-tag">
+          {part}
+        </span>
+      );
+    }
+    return part;
+  });
+};
+
 export default function MessageList({
   messages = [],
   loading,
@@ -37,6 +82,7 @@ export default function MessageList({
   onHide,
   onReact,
   onReply,
+  onPin,
   readAt,
   hasMore,
   loadingOlder,
@@ -144,7 +190,7 @@ export default function MessageList({
 
   const saveEdit = async (m) => {
     const clean = draft.trim();
-    if (!clean && !m.attachment) return;
+    if (!clean && !m.attachment && !m.audio) return;
     if (clean === m.text) {
       cancelEdit();
       return;
@@ -179,6 +225,13 @@ export default function MessageList({
     setPickerId(null);
     const res = await onReact(m._id, key);
     if (!res.ok) setActionError(res.error || 'Could not react');
+  };
+
+  const togglePin = async (m) => {
+    setPickerId(null);
+    if (!onPin) return;
+    const res = await onPin(m._id, !m.pinned);
+    if (!res?.ok) setActionError(res?.error || 'Could not update pin');
   };
 
   const jumpTo = (targetId) => {
@@ -326,6 +379,16 @@ export default function MessageList({
                                   )}
                                 </span>
                               )}
+                              {!m.deleted && onPin && (
+                                <button
+                                  className={`act-icon ${m.pinned ? 'on' : ''}`}
+                                  onClick={() => togglePin(m)}
+                                  aria-label={m.pinned ? 'Unpin message' : 'Pin message'}
+                                  title={m.pinned ? 'Unpin message' : 'Pin message'}
+                                >
+                                  <Pin size={14} />
+                                </button>
+                              )}
                               {canEdit && (
                                 <button
                                   className="act-icon"
@@ -352,6 +415,12 @@ export default function MessageList({
                       )}
 
                       <div className={`bubble ${editing ? 'editing' : ''} ${m.deleted ? 'gone' : ''}`}>
+                        {m.pinned && !m.deleted && (
+                          <div className="msg-pinned-badge">
+                            <Pin size={11} /> Pinned
+                          </div>
+                        )}
+
                         {!mine && first && !isDm && <span className="msg-name">{m.sender.name}</span>}
 
                         {m.replyTo && !m.deleted && (
@@ -364,7 +433,12 @@ export default function MessageList({
                             <span>
                               {m.replyTo.deleted
                                 ? 'This message was deleted'
-                                : m.replyTo.text || (m.replyTo.attachment ? 'Shared an attachment' : '')}
+                                : m.replyTo.text ||
+                                  (m.replyTo.audio
+                                    ? '🎤 Voice message'
+                                    : m.replyTo.attachment
+                                    ? '🖼️ Attachment'
+                                    : '')}
                             </span>
                           </button>
                         )}
@@ -406,7 +480,12 @@ export default function MessageList({
                           </div>
                         ) : (
                           <>
-                            {m.text && <span className="msg-text">{m.text}</span>}
+                            {m.text && <span className="msg-text">{renderMessageContent(m.text)}</span>}
+
+                            {/* Voice Message Player */}
+                            {m.audio?.url && (
+                              <AudioMessage audio={m.audio} isMine={mine} />
+                            )}
 
                             {/* Media Attachment Display */}
                             {m.attachment?.url && (
@@ -423,6 +502,30 @@ export default function MessageList({
                                   />
                                 )}
                               </div>
+                            )}
+
+                            {/* Open Graph Link Preview Card */}
+                            {m.linkPreview?.title && (
+                              <a
+                                href={m.linkPreview.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="link-preview-card"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {m.linkPreview.image && (
+                                  <div className="preview-img-wrap">
+                                    <img src={m.linkPreview.image} alt={m.linkPreview.title} loading="lazy" />
+                                  </div>
+                                )}
+                                <div className="preview-info">
+                                  <span className="preview-site mono">{m.linkPreview.siteName}</span>
+                                  <strong className="preview-title">{m.linkPreview.title}</strong>
+                                  {m.linkPreview.description && (
+                                    <p className="preview-desc">{m.linkPreview.description}</p>
+                                  )}
+                                </div>
+                              </a>
                             )}
                           </>
                         )}

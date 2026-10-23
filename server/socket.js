@@ -4,9 +4,22 @@ const Conversation = require('./models/Conversation');
 const Message = require('./models/Message');
 const mongoose = require('mongoose');
 const ReadState = require('./models/ReadState');
+const { getLinkPreview } = require('./utils/linkPreview');
+
 const REACTION_KEYS = ['like', 'love', 'laugh', 'wow', 'fire', 'thanks'];
 
 const room = (id) => `convo:${id}`;
+
+const MSG_POPULATE = [
+  { path: 'sender', select: 'name color' },
+  { path: 'pinnedBy', select: 'name color' },
+  { path: 'mentions', select: 'name color' },
+  {
+    path: 'replyTo',
+    select: 'text attachment audio deleted sender',
+    populate: { path: 'sender', select: 'name color' },
+  },
+];
 
 module.exports = function setupSocket(io) {
   const online = new Map(); // userId -> Set of socket ids (one user can have many tabs)
@@ -49,7 +62,7 @@ module.exports = function setupSocket(io) {
     const sent = [];
     socket.on(
       'message:send',
-      async ({ conversationId, text, replyTo, attachment } = {}, ack = () => {}) => {
+      async ({ conversationId, text, replyTo, attachment, audio, mentions } = {}, ack = () => {}) => {
         try {
           const now = Date.now();
           while (sent.length && now - sent[0] > 5000) sent.shift();
@@ -68,7 +81,16 @@ module.exports = function setupSocket(io) {
                 }
               : null;
 
-          if (!clean && !validAttachment) {
+          const validAudio =
+            audio && typeof audio.url === 'string'
+              ? {
+                  url: audio.url,
+                  duration: typeof audio.duration === 'number' ? audio.duration : 0,
+                  publicId: audio.publicId || null,
+                }
+              : null;
+
+          if (!clean && !validAttachment && !validAudio) {
             return ack({ ok: false, error: 'Message cannot be empty' });
           }
           if (clean.length > 2000) return ack({ ok: false, error: 'Message is too long' });
@@ -85,22 +107,32 @@ module.exports = function setupSocket(io) {
             replyId = original._id;
           }
 
+          // Fetch link preview asynchronously if any URL present
+          let linkPreview = null;
+          if (clean) {
+            try {
+              linkPreview = await getLinkPreview(clean);
+            } catch {
+              linkPreview = null;
+            }
+          }
+
+          const validMentions = Array.isArray(mentions)
+            ? mentions.filter((id) => mongoose.isValidObjectId(id))
+            : [];
+
           const msg = await Message.create({
             conversation: conversationId,
             sender: socket.user._id,
             text: clean,
             replyTo: replyId,
             attachment: validAttachment,
+            audio: validAudio,
+            mentions: validMentions,
+            linkPreview,
           });
 
-          await msg.populate([
-            { path: 'sender', select: 'name color' },
-            {
-              path: 'replyTo',
-              select: 'text attachment deleted sender',
-              populate: { path: 'sender', select: 'name color' },
-            },
-          ]);
+          await msg.populate(MSG_POPULATE);
 
           io.to(room(conversationId)).emit('message:new', msg);
           ack({ ok: true, message: msg });
@@ -137,17 +169,16 @@ module.exports = function setupSocket(io) {
 
         msg.text = clean;
         msg.edited = true;
+        if (clean) {
+          msg.linkPreview = await getLinkPreview(clean);
+        } else {
+          msg.linkPreview = null;
+        }
+
         await msg.save();
-        await msg.populate([
-          { path: 'sender', select: 'name color' },
-          {
-            path: 'replyTo',
-            select: 'text attachment deleted sender',
-            populate: { path: 'sender', select: 'name color' },
-          },
-        ]);
+        await msg.populate(MSG_POPULATE);
         io.to(room(msg.conversation)).emit('message:updated', msg);
-        ack({ ok: true });
+        ack({ ok: true, message: msg });
       } catch {
         ack({ ok: false, error: 'Could not edit message' });
       }
@@ -166,16 +197,12 @@ module.exports = function setupSocket(io) {
           msg.deleted = true;
           msg.text = '';
           msg.attachment = null;
+          msg.audio = null;
+          msg.linkPreview = null;
+          msg.pinned = false;
           await msg.save();
         }
-        await msg.populate([
-          { path: 'sender', select: 'name color' },
-          {
-            path: 'replyTo',
-            select: 'text attachment deleted sender',
-            populate: { path: 'sender', select: 'name color' },
-          },
-        ]);
+        await msg.populate(MSG_POPULATE);
         io.to(room(msg.conversation)).emit('message:updated', msg);
         ack({ ok: true });
       } catch {
@@ -183,7 +210,32 @@ module.exports = function setupSocket(io) {
       }
     });
 
-    // 4c. Delete for me: hide any message from my own view only
+    // 4c. Pin and Unpin messages
+    socket.on('message:pin', async ({ messageId, pinned } = {}, ack = () => {}) => {
+      try {
+        if (tooFast()) return ack({ ok: false, error: 'Slow down a little' });
+        if (!mongoose.isValidObjectId(messageId)) return ack({ ok: false, error: 'Message not found' });
+
+        const msg = await Message.findById(messageId);
+        if (!msg || msg.deleted) return ack({ ok: false, error: 'Message not found' });
+        if (!socket.rooms.has(room(msg.conversation))) return ack({ ok: false, error: 'Not allowed' });
+
+        const isPinned = Boolean(pinned);
+        msg.pinned = isPinned;
+        msg.pinnedAt = isPinned ? new Date() : null;
+        msg.pinnedBy = isPinned ? socket.user._id : null;
+
+        await msg.save();
+        await msg.populate(MSG_POPULATE);
+
+        io.to(room(msg.conversation)).emit('message:pinned', msg);
+        ack({ ok: true, message: msg });
+      } catch {
+        ack({ ok: false, error: 'Could not pin message' });
+      }
+    });
+
+    // 4d. Delete for me: hide any message from my own view only
     socket.on('message:hide', async ({ messageId } = {}, ack = () => {}) => {
       try {
         if (tooFast()) return ack({ ok: false, error: 'Slow down a little' });
@@ -194,7 +246,6 @@ module.exports = function setupSocket(io) {
         if (!socket.rooms.has(room(msg.conversation))) return ack({ ok: false, error: 'Not allowed' });
 
         await Message.updateOne({ _id: messageId }, { $addToSet: { hiddenFor: socket.user._id } });
-        // Only this user's own tabs hear about it
         io.to(`user:${userId}`).emit('message:hidden', {
           messageId: String(messageId),
           conversationId: String(msg.conversation),
@@ -205,14 +256,14 @@ module.exports = function setupSocket(io) {
       }
     });
 
-    // 4d. Read receipts (direct messages and groups)
+    // 4e. Read receipts (direct messages and groups)
     const lastReadEmit = {};
     socket.on('conversation:read', async ({ conversationId } = {}) => {
       try {
         if (!mongoose.isValidObjectId(conversationId)) return;
         if (!socket.rooms.has(room(conversationId))) return;
         const nowMs = Date.now();
-        if (nowMs - (lastReadEmit[conversationId] || 0) < 400) return; // light throttle
+        if (nowMs - (lastReadEmit[conversationId] || 0) < 400) return;
         lastReadEmit[conversationId] = nowMs;
 
         const convo = await Conversation.findById(conversationId).select('type');
@@ -234,7 +285,7 @@ module.exports = function setupSocket(io) {
       }
     });
 
-    // 4e. Reactions: one per person per message; tapping the same one again removes it
+    // 4f. Reactions
     socket.on('message:react', async ({ messageId, key } = {}, ack = () => {}) => {
       try {
         if (tooFast()) return ack({ ok: false, error: 'Slow down a little' });
@@ -266,7 +317,7 @@ module.exports = function setupSocket(io) {
       }
     });
 
-    // 5. Typing indicator (not saved, only relayed)
+    // 5. Typing indicator
     socket.on('typing', ({ conversationId, isTyping } = {}) => {
       if (!socket.rooms.has(room(conversationId))) return;
       socket.to(room(conversationId)).emit('typing', {
