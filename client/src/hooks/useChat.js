@@ -31,6 +31,7 @@ export default function useChat(user, onAuthError) {
   const [loadingOlder, setLoadingOlder] = useState(false);
 
   const socketRef = useRef(null);
+  const [socketInstance, setSocketInstance] = useState(null);
   const activeRef = useRef(null);
   const loadedRef = useRef(new Set());
   const timers = useRef({});
@@ -109,6 +110,7 @@ export default function useChat(user, onAuthError) {
       auth: (cb) => cb({ token: localStorage.getItem('token') }),
     });
     socketRef.current = socket;
+    setSocketInstance(socket);
 
     const dropTyping = (cid, uid) => {
       clearTimeout(timers.current[`${cid}:${uid}`]);
@@ -489,7 +491,7 @@ export default function useChat(user, onAuthError) {
     : true;
 
   return {
-    socket: socketRef.current,
+    socket: socketInstance,
     conversations,
     activeId,
     messages,
