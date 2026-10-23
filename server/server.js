@@ -5,6 +5,8 @@ const cors = require('cors');
 const helmet = require('helmet');
 const { Server } = require('socket.io');
 const { rateLimit } = require('express-rate-limit');
+const { createAdapter } = require('@socket.io/redis-adapter');
+const { createClient } = require('redis');
 const connectDB = require('./config/db');
 const seedDefaults = require('./utils/seed');
 
@@ -23,6 +25,8 @@ app.use(express.json({ limit: '10kb' }));
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 app.use('/api/users', require('./routes/users'));
+app.use('/api/upload', require('./routes/upload'));
+
 // Strict limit on login/register: 20 attempts per 15 minutes per IP
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -34,11 +38,29 @@ const authLimiter = rateLimit({
 
 app.use('/api/auth', authLimiter, require('./routes/auth'));
 app.use('/api/conversations', require('./routes/conversations'));
+
 // Socket.io shares the same HTTP server as Express
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: process.env.CLIENT_URL || '*' },
 });
+
+// Optional Redis Adapter for horizontal multi-instance scaling
+if (process.env.REDIS_URL) {
+  const pubClient = createClient({ url: process.env.REDIS_URL });
+  const subClient = pubClient.duplicate();
+
+  Promise.all([pubClient.connect(), subClient.connect()])
+    .then(() => {
+      io.adapter(createAdapter(pubClient, subClient));
+      console.log('Socket.io Redis adapter connected successfully');
+    })
+    .catch((err) => {
+      console.warn('Redis connection failed, continuing with in-memory adapter:', err.message);
+    });
+} else {
+  console.log('Redis URL not specified; Socket.io running with default in-memory adapter');
+}
 
 app.set('io', io); // lets REST routes reach the socket server
 require('./socket')(io);

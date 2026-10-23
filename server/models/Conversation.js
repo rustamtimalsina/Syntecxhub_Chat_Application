@@ -2,11 +2,11 @@ const mongoose = require('mongoose');
 
 const conversationSchema = new mongoose.Schema(
   {
-    type: { type: String, enum: ['channel', 'dm'], required: true },
-    name: { type: String, trim: true, maxlength: 40 },        // channels only
+    type: { type: String, enum: ['channel', 'dm', 'group'], required: true },
+    name: { type: String, trim: true, maxlength: 40 },        // channels and groups
     slug: { type: String, unique: true, sparse: true },       // channels only
     description: { type: String, trim: true, maxlength: 120, default: '' },
-    members: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // dms only
+    members: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // dms and groups
     dmKey: { type: String, unique: true, sparse: true },   // dms only: "idA:idB", prevents duplicate chats
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },

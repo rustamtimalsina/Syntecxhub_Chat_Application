@@ -2,16 +2,34 @@ import { motion } from 'motion/react';
 import Avatar from './Avatar.jsx';
 import ThemeToggle from './ThemeToggle.jsx';
 import { otherMember } from '../lib/convo';
-import { Plus, LogOut, X, Search, Volume2, VolumeX, Bell, BellOff } from 'lucide-react';
+import { Plus, LogOut, X, Search, Volume2, VolumeX, Bell, BellOff, Users } from 'lucide-react';
 
 const pad = (n) => String(n + 1).padStart(2, '0');
 const GLOW = { type: 'spring', stiffness: 520, damping: 42 };
 
 export default function Sidebar({
-  user, conversations, activeId, unread, last, online, open, muted, notify,
-  onSelect, onNewRoom, onNewDm, onSearch, onToggleSound, onToggleNotify, onOpenSettings, onLogout, onClose,
+  user,
+  conversations,
+  activeId,
+  unread,
+  last,
+  online,
+  open,
+  muted,
+  notify,
+  onSelect,
+  onNewRoom,
+  onNewDm,
+  onNewGroup,
+  onSearch,
+  onToggleSound,
+  onToggleNotify,
+  onOpenSettings,
+  onLogout,
+  onClose,
 }) {
   const channels = conversations.filter((c) => c.type === 'channel');
+  const groups = conversations.filter((c) => c.type === 'group');
   const dms = conversations
     .filter((c) => c.type === 'dm')
     .sort(
@@ -20,10 +38,12 @@ export default function Sidebar({
         new Date(last[a._id]?.createdAt || a.createdAt)
     );
 
-    const preview = (c, fallback) => {
+  const preview = (c, fallback) => {
     const l = last[c._id];
     if (!l) return fallback;
-    const text = l.deleted ? 'Message deleted' : l.text;
+    const text = l.deleted
+      ? 'Message deleted'
+      : l.text || (l.attachment ? 'Shared an attachment' : '');
     const mine = String(l.sender._id) === String(user._id);
     return c.type === 'dm' ? `${mine ? 'You: ' : ''}${text}` : `${l.sender.name}: ${text}`;
   };
@@ -31,7 +51,9 @@ export default function Sidebar({
   return (
     <aside className={`sidebar ${open ? 'open' : ''}`}>
       <div className="sb-top">
-        <span className="sb-brand"><span className="sb-dot" />Nightdesk</span>
+        <span className="sb-brand">
+          <span className="sb-dot" />Nightdesk
+        </span>
         <button className="icon-btn sb-close" onClick={onClose} aria-label="Close menu">
           <X size={18} />
         </button>
@@ -44,6 +66,7 @@ export default function Sidebar({
       </button>
 
       <nav className="rooms" aria-label="Conversations">
+        {/* Channels */}
         <div className="sb-section">
           <span>Channels</span>
           <button className="icon-btn sm" onClick={onNewRoom} aria-label="Create a room">
@@ -55,7 +78,11 @@ export default function Sidebar({
           const active = c._id === activeId;
           const count = unread[c._id] || 0;
           return (
-            <button key={c._id} className={`room ${active ? 'active' : ''}`} onClick={() => onSelect(c._id)}>
+            <button
+              key={c._id}
+              className={`room ${active ? 'active' : ''}`}
+              onClick={() => onSelect(c._id)}
+            >
               {active && <motion.span layoutId="room-glow" className="room-glow" transition={GLOW} />}
               <span className="room-num mono">{pad(i)}</span>
               <span className="room-text">
@@ -67,6 +94,40 @@ export default function Sidebar({
           );
         })}
 
+        {/* Groups */}
+        <div className="sb-section">
+          <span>Groups</span>
+          <button className="icon-btn sm" onClick={onNewGroup} aria-label="Create a group chat">
+            <Plus size={16} />
+          </button>
+        </div>
+
+        {groups.length === 0 && <p className="sb-empty">No group chats yet. Press + to create one.</p>}
+
+        {groups.map((c) => {
+          const active = c._id === activeId;
+          const count = unread[c._id] || 0;
+          const memberCount = c.members?.length || 0;
+          return (
+            <button
+              key={c._id}
+              className={`room ${active ? 'active' : ''}`}
+              onClick={() => onSelect(c._id)}
+            >
+              {active && <motion.span layoutId="room-glow" className="room-glow" transition={GLOW} />}
+              <span className="grp-badge-icon">
+                <Users size={16} />
+              </span>
+              <span className="room-text">
+                <span className="room-name">{c.name}</span>
+                <span className="room-preview">{preview(c, `${memberCount} members`)}</span>
+              </span>
+              {count > 0 && <span className="badge">{count > 99 ? '99+' : count}</span>}
+            </button>
+          );
+        })}
+
+        {/* Direct Messages */}
         <div className="sb-section">
           <span>Direct messages</span>
           <button className="icon-btn sm" onClick={onNewDm} aria-label="Start a direct message">
@@ -83,7 +144,11 @@ export default function Sidebar({
           const count = unread[c._id] || 0;
           const isOn = online.has(String(other._id));
           return (
-            <button key={c._id} className={`room ${active ? 'active' : ''}`} onClick={() => onSelect(c._id)}>
+            <button
+              key={c._id}
+              className={`room ${active ? 'active' : ''}`}
+              onClick={() => onSelect(c._id)}
+            >
               {active && <motion.span layoutId="room-glow" className="room-glow" transition={GLOW} />}
               <span className="av-wrap">
                 <Avatar name={other.name} color={other.color} size={26} />
@@ -100,14 +165,20 @@ export default function Sidebar({
       </nav>
 
       <div className="sb-foot">
-        <button className="sb-profile" onClick={onOpenSettings} aria-label="Open profile settings" title="Profile settings">
+        <button
+          className="sb-profile"
+          onClick={onOpenSettings}
+          aria-label="Open profile settings"
+          title="Profile settings"
+        >
           <Avatar name={user.name} color={user.color} size={36} />
           <span className="sb-me">
             <strong>{user.name}</strong>
             <span>Online</span>
           </span>
         </button>
-                <button
+
+        <button
           className="icon-btn"
           onClick={onToggleNotify}
           aria-label={notify ? 'Turn desktop notifications off' : 'Turn desktop notifications on'}
@@ -116,7 +187,7 @@ export default function Sidebar({
           {notify ? <Bell size={18} /> : <BellOff size={18} />}
         </button>
 
-                <button
+        <button
           className="icon-btn"
           onClick={onToggleSound}
           aria-label={muted ? 'Turn message sounds on' : 'Mute message sounds'}

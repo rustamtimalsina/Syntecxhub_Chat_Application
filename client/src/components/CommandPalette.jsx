@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { Search } from 'lucide-react';
+import { Search, Users } from 'lucide-react';
 import api from '../lib/api';
 import Avatar from './Avatar.jsx';
 import { otherMember } from '../lib/convo';
@@ -14,29 +14,62 @@ export default function CommandPalette({ conversations, unread, myId, onSelect, 
   const listRef = useRef(null);
   const q = query.trim().toLowerCase();
 
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
 
   useEffect(() => {
-    if (!q) { setPeople([]); return undefined; }
+    if (!q) {
+      return undefined;
+    }
     let cancelled = false;
     const t = setTimeout(() => {
-      api.get('/users', { params: { q } })
-        .then(({ data }) => { if (!cancelled) setPeople(data); })
-        .catch(() => { if (!cancelled) setPeople([]); });
+      api
+        .get('/users', { params: { q } })
+        .then(({ data }) => {
+          if (!cancelled) setPeople(data);
+        })
+        .catch(() => {
+          if (!cancelled) setPeople([]);
+        });
     }, 200);
-    return () => { cancelled = true; clearTimeout(t); };
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [q]);
 
   const items = useMemo(() => {
     const rooms = conversations
       .filter((c) => c.type === 'channel')
-      .map((c, i) => ({ kind: 'room', id: c._id, label: c.name, sub: c.description, num: String(i + 1).padStart(2, '0') }));
+      .map((c, i) => ({
+        kind: 'room',
+        id: c._id,
+        label: c.name,
+        sub: c.description,
+        num: String(i + 1).padStart(2, '0'),
+      }));
+
+    const groups = conversations
+      .filter((c) => c.type === 'group')
+      .map((c) => ({
+        kind: 'group',
+        id: c._id,
+        label: c.name,
+        sub: `${c.members?.length || 0} members · Group`,
+      }));
 
     const dms = conversations
       .filter((c) => c.type === 'dm')
       .map((c) => {
         const o = otherMember(c, myId);
-        return { kind: 'dm', id: c._id, label: o?.name || 'Unknown', sub: 'Direct message', color: o?.color };
+        return {
+          kind: 'dm',
+          id: c._id,
+          label: o?.name || 'Unknown',
+          sub: 'Direct message',
+          color: o?.color,
+        };
       });
 
     const hasDm = new Set(
@@ -44,14 +77,21 @@ export default function CommandPalette({ conversations, unread, myId, onSelect, 
     );
     const newPeople = people
       .filter((p) => !hasDm.has(String(p._id)))
-      .map((p) => ({ kind: 'person', id: p._id, label: p.name, sub: 'Start a new message', color: p.color }));
+      .map((p) => ({
+        kind: 'person',
+        id: p._id,
+        label: p.name,
+        sub: 'Start a new message',
+        color: p.color,
+      }));
 
     const match = (it) => !q || it.label.toLowerCase().includes(q) || (it.sub || '').toLowerCase().includes(q);
-    return [...rooms.filter(match), ...dms.filter(match), ...(q ? newPeople : [])];
+    return [...rooms.filter(match), ...groups.filter(match), ...dms.filter(match), ...(q ? newPeople : [])];
   }, [conversations, people, q, myId]);
 
-  useEffect(() => { setIndex(0); }, [query]);
-  useEffect(() => { listRef.current?.children[index]?.scrollIntoView({ block: 'nearest' }); }, [index]);
+  useEffect(() => {
+    listRef.current?.children[index]?.scrollIntoView({ block: 'nearest' });
+  }, [index]);
 
   const choose = async (item) => {
     if (!item) return;
@@ -106,10 +146,13 @@ export default function CommandPalette({ conversations, unread, myId, onSelect, 
           <input
             ref={inputRef}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setIndex(0);
+            }}
             onKeyDown={onKeyDown}
-            placeholder="Jump to a room or person…"
-            aria-label="Search rooms and people"
+            placeholder="Jump to a room, group, or person…"
+            aria-label="Search rooms, groups, and people"
           />
         </div>
 
@@ -130,6 +173,10 @@ export default function CommandPalette({ conversations, unread, myId, onSelect, 
               >
                 {it.kind === 'room' ? (
                   <span className="mono">{it.num}</span>
+                ) : it.kind === 'group' ? (
+                  <span className="grp-badge-icon">
+                    <Users size={16} />
+                  </span>
                 ) : (
                   <Avatar name={it.label} color={it.color} size={24} />
                 )}

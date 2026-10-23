@@ -22,6 +22,15 @@ api.interceptors.response.use(
   }
 );
 
+export const uploadMedia = async (file) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await api.post('/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return res.data;
+};
+
 export const errorMessage = (err) =>
   err.response?.data?.message || 'Something went wrong. Please try again.';
 

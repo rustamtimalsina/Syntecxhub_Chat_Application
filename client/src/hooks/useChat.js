@@ -25,7 +25,9 @@ export default function useChat(user, onAuthError) {
   const [online, setOnline] = useState(() => new Set());
   const [typing, setTyping] = useState({}); // conversationId -> { userId: name }
   const [status, setStatus] = useState('connecting');
-    const [reads, setReads] = useState({}); // conversationId -> { userId: lastReadAt }
+  const [reads, setReads] = useState({}); // conversationId -> { userId: lastReadAt }
+  const [hasMore, setHasMore] = useState({}); // conversationId -> boolean
+  const [loadingOlder, setLoadingOlder] = useState(false);
 
   const socketRef = useRef(null);
   const activeRef = useRef(null);
@@ -33,26 +35,42 @@ export default function useChat(user, onAuthError) {
   const timers = useRef({});
   const authErrorRef = useRef(onAuthError);
 
-  useEffect(() => { activeRef.current = activeId; }, [activeId]);
-  useEffect(() => { authErrorRef.current = onAuthError; }, [onAuthError]);
-    const messagesRef = useRef({});
-  useEffect(() => { messagesRef.current = messages; }, [messages]);
-    const convosRef = useRef([]);
-      const selectRef = useRef(null);
-  useEffect(() => { convosRef.current = conversations; }, [conversations]);
+  useEffect(() => {
+    activeRef.current = activeId;
+  }, [activeId]);
+
+  useEffect(() => {
+    authErrorRef.current = onAuthError;
+  }, [onAuthError]);
+
+  const messagesRef = useRef({});
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  const convosRef = useRef([]);
+  const selectRef = useRef(null);
+  useEffect(() => {
+    convosRef.current = conversations;
+  }, [conversations]);
 
   const markRead = useCallback((cid) => {
     if (!cid || document.hidden) return;
-    if (convosRef.current.find((c) => c._id === cid)?.type !== 'dm') return;
+    const current = convosRef.current.find((c) => c._id === cid);
+    if (!current || (current.type !== 'dm' && current.type !== 'group')) return;
     socketRef.current?.emit('conversation:read', { conversationId: cid });
   }, []);
 
-  // Opening a direct message marks it as read
-  useEffect(() => { markRead(activeId); }, [activeId, conversations, markRead]);
+  // Opening a direct message or group marks it as read
+  useEffect(() => {
+    markRead(activeId);
+  }, [activeId, conversations, markRead]);
 
   // Coming back to the tab marks the open chat as read
   useEffect(() => {
-    const onVisible = () => { if (!document.hidden) markRead(activeRef.current); };
+    const onVisible = () => {
+      if (!document.hidden) markRead(activeRef.current);
+    };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onVisible);
     return () => {
@@ -61,20 +79,28 @@ export default function useChat(user, onAuthError) {
     };
   }, [markRead]);
 
-  // Rooms
+  // Rooms and Conversations
   const loadConversations = useCallback(async () => {
     setLoadError(false);
     try {
       const { data } = await api.get('/conversations');
-           setConversations(data);
-      setReads(Object.fromEntries(data.filter((c) => c.type === 'dm').map((c) => [c._id, c.reads || {}])));
+      setConversations(data);
+      setReads(
+        Object.fromEntries(
+          data
+            .filter((c) => c.type === 'dm' || c.type === 'group')
+            .map((c) => [c._id, c.reads || {}])
+        )
+      );
       setActiveId((cur) => cur || data.find((c) => c.slug === 'general')?._id || data[0]?._id || null);
     } catch {
       setLoadError(true);
     }
   }, []);
 
-  useEffect(() => { loadConversations(); }, [loadConversations]);
+  useEffect(() => {
+    loadConversations();
+  }, [loadConversations]);
 
   // Socket
   useEffect(() => {
@@ -99,48 +125,75 @@ export default function useChat(user, onAuthError) {
       setStatus('error');
       if (/token|user not found/i.test(err.message)) authErrorRef.current?.();
     });
-       socket.on('conversation:read', ({ conversationId, userId, at }) =>
-      setReads((prev) => ({ ...prev, [conversationId]: { ...(prev[conversationId] || {}), [userId]: at } }))
+
+    socket.on('conversation:read', ({ conversationId, userId, at }) =>
+      setReads((prev) => ({
+        ...prev,
+        [conversationId]: { ...(prev[conversationId] || {}), [userId]: at },
+      }))
     );
+
     socket.on('presence:list', (ids) => setOnline(new Set(ids)));
     socket.on('presence:update', ({ userId, online: isOn }) =>
       setOnline((prev) => {
         const next = new Set(prev);
-        if (isOn) next.add(userId); else next.delete(userId);
+        if (isOn) next.add(userId);
+        else next.delete(userId);
         return next;
       })
     );
 
-    socket.on('conversation:created', (room) =>
-      setConversations((prev) => (prev.some((c) => c._id === room._id) ? prev : [...prev, room]))
-    );
+    socket.on('conversation:created', (room) => {
+      setConversations((prev) => (prev.some((c) => c._id === room._id) ? prev : [...prev, room]));
+    });
+
+    socket.on('group:updated', (updated) => {
+      setConversations((prev) => prev.map((c) => (c._id === updated._id ? { ...c, ...updated } : c)));
+    });
+
+    socket.on('group:removed', ({ conversationId }) => {
+      setConversations((prev) => prev.filter((c) => c._id !== conversationId));
+      setActiveId((cur) => (cur === conversationId ? null : cur));
+    });
 
     socket.on('message:new', (msg) => {
       const cid = msg.conversation;
-            if (msg.sender._id === user._id) playSent(); else playIncoming();
+      if (msg.sender._id === user._id) playSent();
+      else playIncoming();
+
       setMessages((prev) => {
         const list = prev[cid] || [];
         if (list.some((m) => m._id === msg._id)) return prev;
         return { ...prev, [cid]: [...list, msg] };
       });
       setLast((prev) => ({ ...prev, [cid]: msg }));
+
       if (cid !== activeRef.current && msg.sender._id !== user._id) {
         setUnread((prev) => ({ ...prev, [cid]: (prev[cid] || 0) + 1 }));
       }
       dropTyping(cid, msg.sender._id);
-            if (msg.sender._id !== user._id && !msg.deleted) {
+
+      if (msg.sender._id !== user._id && !msg.deleted) {
         const convo = convosRef.current.find((c) => c._id === cid);
-        const room = convo?.type === 'channel' ? ` in #${convo.name}` : '';
+        const roomName =
+          convo?.type === 'channel'
+            ? ` in #${convo.name}`
+            : convo?.type === 'group'
+            ? ` in ${convo.name}`
+            : '';
+        const bodyText = msg.text || (msg.attachment ? 'Shared an attachment' : 'New message');
         showNotification({
-          title: `${msg.sender.name}${room}`,
-          body: msg.text.length > 140 ? `${msg.text.slice(0, 140)}…` : msg.text,
+          title: `${msg.sender.name}${roomName}`,
+          body: bodyText.length > 140 ? `${bodyText.slice(0, 140)}…` : bodyText,
           tag: cid,
           onClick: () => selectRef.current?.(cid),
         });
       }
-            if (cid === activeRef.current && msg.sender._id !== user._id) markRead(cid);
+
+      if (cid === activeRef.current && msg.sender._id !== user._id) markRead(cid);
     });
-       socket.on('message:updated', (msg) => {
+
+    socket.on('message:updated', (msg) => {
       const cid = msg.conversation;
       setMessages((prev) => {
         const list = prev[cid];
@@ -150,7 +203,10 @@ export default function useChat(user, onAuthError) {
           [cid]: list.map((m) => {
             if (m._id === msg._id) return { ...msg, replyTo: m.replyTo };
             if (m.replyTo?._id === msg._id) {
-              return { ...m, replyTo: { ...m.replyTo, text: msg.text, deleted: msg.deleted } };
+              return {
+                ...m,
+                replyTo: { ...m.replyTo, text: msg.text, attachment: msg.attachment, deleted: msg.deleted },
+              };
             }
             return m;
           }),
@@ -158,7 +214,8 @@ export default function useChat(user, onAuthError) {
       });
       setLast((prev) => (prev[cid]?._id === msg._id ? { ...prev, [cid]: msg } : prev));
     });
-        socket.on('message:hidden', ({ messageId, conversationId }) => {
+
+    socket.on('message:hidden', ({ messageId, conversationId }) => {
       const rest = (messagesRef.current[conversationId] || []).filter((m) => m._id !== messageId);
       setMessages((prev) =>
         prev[conversationId]
@@ -171,7 +228,8 @@ export default function useChat(user, onAuthError) {
           : prev
       );
     });
-        socket.on('message:reacted', ({ messageId, conversationId, reactions }) =>
+
+    socket.on('message:reacted', ({ messageId, conversationId, reactions }) =>
       setMessages((prev) => {
         const list = prev[conversationId];
         if (!list) return prev;
@@ -181,7 +239,8 @@ export default function useChat(user, onAuthError) {
         };
       })
     );
-        // Someone changed their name or color: update it everywhere, live
+
+    // Live update when someone changes name or color
     socket.on('user:updated', (u) => {
       const fix = (s) => (s && String(s._id) === String(u._id) ? { ...s, name: u.name, color: u.color } : s);
       setConversations((prev) =>
@@ -196,6 +255,7 @@ export default function useChat(user, onAuthError) {
         Object.fromEntries(Object.entries(prev).map(([cid, m]) => [cid, m ? { ...m, sender: fix(m.sender) } : m]))
       );
     });
+
     socket.on('typing', ({ conversationId, isTyping, user: u }) => {
       if (!isTyping) return dropTyping(conversationId, u._id);
       setTyping((prev) => ({
@@ -204,7 +264,8 @@ export default function useChat(user, onAuthError) {
       }));
       clearTimeout(timers.current[`${conversationId}:${u._id}`]);
       timers.current[`${conversationId}:${u._id}`] = setTimeout(
-        () => dropTyping(conversationId, u._id), 4000
+        () => dropTyping(conversationId, u._id),
+        4000
       );
     });
 
@@ -213,19 +274,26 @@ export default function useChat(user, onAuthError) {
       Object.values(pending).forEach(clearTimeout);
       socket.disconnect();
     };
-  }, [user._id]);
+  }, [user._id, markRead]);
 
-  // History for the active room
+  // Initial history for the active room
   useEffect(() => {
     setHistoryError(false);
     const id = activeId;
     if (!id || loadedRef.current.has(id)) return;
     loadedRef.current.add(id);
     setLoadingId(id);
-    api.get(`/conversations/${id}/messages`)
-      .then(({ data }) => {
+
+    api
+      .get(`/conversations/${id}/messages`)
+      .then((res) => {
+        const data = res.data;
+        const moreHeader = res.headers['x-has-more'];
+        setHasMore((prev) => ({ ...prev, [id]: moreHeader === 'true' || data.length >= 50 }));
         setMessages((prev) => ({ ...prev, [id]: merge(data, prev[id] || []) }));
-        if (data.length) setLast((prev) => (prev[id] ? prev : { ...prev, [id]: data[data.length - 1] }));
+        if (data.length) {
+          setLast((prev) => (prev[id] ? prev : { ...prev, [id]: data[data.length - 1] }));
+        }
       })
       .catch(() => {
         loadedRef.current.delete(id);
@@ -234,63 +302,147 @@ export default function useChat(user, onAuthError) {
       .finally(() => setLoadingId((cur) => (cur === id ? null : cur)));
   }, [activeId, historyKey]);
 
+  // Load older messages (infinite scroll back)
+  const loadOlder = useCallback(async () => {
+    const id = activeRef.current;
+    if (!id || loadingOlder || hasMore[id] === false) return;
+    const currentList = messagesRef.current[id] || [];
+    if (!currentList.length) return;
+
+    const oldest = currentList[0];
+    setLoadingOlder(true);
+    try {
+      const res = await api.get(`/conversations/${id}/messages`, {
+        params: { before: oldest.createdAt, limit: 50 },
+      });
+      const data = res.data;
+      const moreHeader = res.headers['x-has-more'];
+      setHasMore((prev) => ({ ...prev, [id]: moreHeader === 'true' || data.length >= 50 }));
+      setMessages((prev) => ({
+        ...prev,
+        [id]: merge(data, prev[id] || []),
+      }));
+    } catch (e) {
+      console.error('Failed to load older messages:', e);
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [hasMore, loadingOlder]);
+
   const select = useCallback((id) => {
     setActiveId(id);
     setUnread((prev) => (prev[id] ? { ...prev, [id]: 0 } : prev));
   }, []);
-    useEffect(() => { selectRef.current = select; }, [select]);
+
+  useEffect(() => {
+    selectRef.current = select;
+  }, [select]);
 
   const reloadHistory = useCallback(() => {
     loadedRef.current.delete(activeRef.current);
     setHistoryKey((k) => k + 1);
   }, []);
 
-  const send = useCallback((text, replyTo) => new Promise((resolve) => {
-    const socket = socketRef.current;
-    if (!socket?.connected) return resolve({ ok: false, error: 'Not connected yet. Reconnecting…' });
-    socket.timeout(8000).emit(
-      'message:send',
-            { conversationId: activeRef.current, text, replyTo },
-      (err, ack) => resolve(err ? { ok: false, error: 'The server took too long. Try again.' } : ack)
-    );
-  }), []);
-    const request = useCallback((event, payload) => new Promise((resolve) => {
-    const socket = socketRef.current;
-    if (!socket?.connected) return resolve({ ok: false, error: 'Not connected yet. Reconnecting…' });
-    socket.timeout(8000).emit(event, payload, (err, ack) =>
-      resolve(err ? { ok: false, error: 'The server took too long. Try again.' } : ack)
-    );
-  }), []);
+  const send = useCallback(
+    (text, replyTo, attachment) =>
+      new Promise((resolve) => {
+        const socket = socketRef.current;
+        if (!socket?.connected) return resolve({ ok: false, error: 'Not connected yet. Reconnecting…' });
+        socket
+          .timeout(8000)
+          .emit(
+            'message:send',
+            { conversationId: activeRef.current, text, replyTo, attachment },
+            (err, ack) => resolve(err ? { ok: false, error: 'The server took too long. Try again.' } : ack)
+          );
+      }),
+    []
+  );
+
+  const request = useCallback(
+    (event, payload) =>
+      new Promise((resolve) => {
+        const socket = socketRef.current;
+        if (!socket?.connected) return resolve({ ok: false, error: 'Not connected yet. Reconnecting…' });
+        socket
+          .timeout(8000)
+          .emit(event, payload, (err, ack) =>
+            resolve(err ? { ok: false, error: 'The server took too long. Try again.' } : ack)
+          );
+      }),
+    []
+  );
 
   const editMessage = useCallback((messageId, text) => request('message:edit', { messageId, text }), [request]);
   const deleteMessage = useCallback((messageId) => request('message:delete', { messageId }), [request]);
-    const hideMessage = useCallback((messageId) => request('message:hide', { messageId }), [request]);
+  const hideMessage = useCallback((messageId) => request('message:hide', { messageId }), [request]);
   const reactToMessage = useCallback((messageId, key) => request('message:react', { messageId, key }), [request]);
-  
+
   const sendTyping = useCallback((isTyping) => {
     socketRef.current?.emit('typing', { conversationId: activeRef.current, isTyping });
   }, []);
 
-  const createRoom = useCallback(async (name, description) => {
-    const { data } = await api.post('/conversations/channels', { name, description });
-    setConversations((prev) => (prev.some((c) => c._id === data._id) ? prev : [...prev, data]));
-    select(data._id);
-    return data;
-  }, [select]);
-    const openDm = useCallback(async (userId) => {
-    const { data } = await api.post('/conversations/dm', { userId });
-    setConversations((prev) => (prev.some((c) => c._id === data._id) ? prev : [...prev, data]));
-    select(data._id);
-    return data;
-  }, [select]);
+  const createRoom = useCallback(
+    async (name, description) => {
+      const { data } = await api.post('/conversations/channels', { name, description });
+      setConversations((prev) => (prev.some((c) => c._id === data._id) ? prev : [...prev, data]));
+      select(data._id);
+      return data;
+    },
+    [select]
+  );
+
+  const openDm = useCallback(
+    async (userId) => {
+      const { data } = await api.post('/conversations/dm', { userId });
+      setConversations((prev) => (prev.some((c) => c._id === data._id) ? prev : [...prev, data]));
+      select(data._id);
+      return data;
+    },
+    [select]
+  );
+
+  const createGroup = useCallback(
+    async (name, memberIds, description) => {
+      const { data } = await api.post('/conversations/groups', { name, memberIds, description });
+      setConversations((prev) => (prev.some((c) => c._id === data._id) ? prev : [...prev, data]));
+      select(data._id);
+      return data;
+    },
+    [select]
+  );
 
   const loading = activeId
     ? (messages[activeId] === undefined || loadingId === activeId) && !historyError
     : true;
 
   return {
-    conversations, activeId, messages, loading, historyError, reloadHistory, loadError,
-        loadConversations, unread, last, online, typing, status, reads,
-        select, send, sendTyping, createRoom, openDm, editMessage, deleteMessage, hideMessage, reactToMessage,
+    conversations,
+    activeId,
+    messages,
+    loading,
+    historyError,
+    reloadHistory,
+    loadError,
+    loadConversations,
+    unread,
+    last,
+    online,
+    typing,
+    status,
+    reads,
+    hasMore: activeId ? Boolean(hasMore[activeId]) : false,
+    loadingOlder,
+    loadOlder,
+    select,
+    send,
+    sendTyping,
+    createRoom,
+    openDm,
+    createGroup,
+    editMessage,
+    deleteMessage,
+    hideMessage,
+    reactToMessage,
   };
 }

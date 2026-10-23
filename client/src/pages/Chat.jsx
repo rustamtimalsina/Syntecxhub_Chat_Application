@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, MotionConfig } from 'motion/react';
-import { Menu } from 'lucide-react';
+import { Menu, Users } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import useChat from '../hooks/useChat.js';
 import { otherMember } from '../lib/convo';
@@ -12,6 +12,7 @@ import MessageList from '../components/MessageList.jsx';
 import Composer from '../components/Composer.jsx';
 import NewRoomModal from '../components/NewRoomModal.jsx';
 import NewMessageModal from '../components/NewMessageModal.jsx';
+import NewGroupModal from '../components/NewGroupModal.jsx';
 import CommandPalette from '../components/CommandPalette.jsx';
 import SettingsModal from '../components/SettingsModal.jsx';
 import './chat.css';
@@ -23,6 +24,7 @@ export default function Chat() {
   const [navOpen, setNavOpen] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showDm, setShowDm] = useState(false);
+  const [showGroup, setShowGroup] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [replyTo, setReplyTo] = useState(null);
@@ -31,10 +33,12 @@ export default function Chat() {
   const [note, setNote] = useState('');
 
   // A reply belongs to one chat, so clear it when you switch chats
-  useEffect(() => { setReplyTo(null); }, [chat.activeId]);
+  useEffect(() => {
+    setReplyTo(null);
+  }, [chat.activeId]);
 
-  const sendMessage = async (text) => {
-    const res = await chat.send(text, replyTo?._id);
+  const sendMessage = async (text, attachment) => {
+    const res = await chat.send(text, replyTo?._id, attachment);
     if (res.ok) setReplyTo(null);
     return res;
   };
@@ -93,9 +97,12 @@ export default function Chat() {
   const channels = chat.conversations.filter((c) => c.type === 'channel');
   const active = chat.conversations.find((c) => c._id === chat.activeId);
   const isDm = active?.type === 'dm';
+  const isGroup = active?.type === 'group';
+
   const other = isDm ? otherMember(active, user._id) : null;
   const otherOnline = other ? chat.online.has(String(other._id)) : false;
   const otherReadAt = other ? chat.reads[chat.activeId]?.[String(other._id)] : null;
+
   const title = isDm ? other?.name || 'Chat' : active?.name;
   const index = channels.findIndex((c) => c._id === chat.activeId);
   const typingNames = Object.entries(chat.typing[chat.activeId] || {})
@@ -112,7 +119,9 @@ export default function Chat() {
       <main className="empty" style={{ height: '100%' }}>
         <h3>Couldn't load your chats</h3>
         <p>Check your connection and try again.</p>
-        <button className="btn btn-primary" onClick={chat.loadConversations}>Retry</button>
+        <button className="btn btn-primary" onClick={chat.loadConversations}>
+          Retry
+        </button>
       </main>
     );
   }
@@ -131,12 +140,28 @@ export default function Chat() {
           muted={muted}
           notify={notify}
           onSelect={select}
-          onNewRoom={() => { setShowNew(true); setNavOpen(false); }}
-          onNewDm={() => { setShowDm(true); setNavOpen(false); }}
-          onSearch={() => { setShowPalette(true); setNavOpen(false); }}
+          onNewRoom={() => {
+            setShowNew(true);
+            setNavOpen(false);
+          }}
+          onNewDm={() => {
+            setShowDm(true);
+            setNavOpen(false);
+          }}
+          onNewGroup={() => {
+            setShowGroup(true);
+            setNavOpen(false);
+          }}
+          onSearch={() => {
+            setShowPalette(true);
+            setNavOpen(false);
+          }}
           onToggleSound={toggleSound}
           onToggleNotify={toggleNotify}
-          onOpenSettings={() => { setShowSettings(true); setNavOpen(false); }}
+          onOpenSettings={() => {
+            setShowSettings(true);
+            setNavOpen(false);
+          }}
           onLogout={logout}
           onClose={() => setNavOpen(false)}
         />
@@ -144,7 +169,11 @@ export default function Chat() {
 
         <section className="chat-main">
           <header className="chat-head">
-            <button className="icon-btn head-menu" onClick={() => setNavOpen(true)} aria-label="Open menu">
+            <button
+              className="icon-btn head-menu"
+              onClick={() => setNavOpen(true)}
+              aria-label="Open menu"
+            >
               <Menu size={18} />
             </button>
 
@@ -155,15 +184,33 @@ export default function Chat() {
               </span>
             )}
 
+            {isGroup && (
+              <span className="grp-head-badge">
+                <Users size={20} />
+              </span>
+            )}
+
             <div className="head-title">
               <h2>
-                {!isDm && index >= 0 && <span className="mono">{String(index + 1).padStart(2, '0')}</span>}
+                {!isDm && !isGroup && index >= 0 && (
+                  <span className="mono">{String(index + 1).padStart(2, '0')}</span>
+                )}
                 {title || ' '}
               </h2>
-              {isDm ? <p>{otherOnline ? 'Online' : 'Offline'}</p> : active?.description && <p>{active.description}</p>}
+              {isDm ? (
+                <p>{otherOnline ? 'Online' : 'Offline'}</p>
+              ) : isGroup ? (
+                <p>{active?.members?.length || 0} members · {active?.description || 'Group chat'}</p>
+              ) : (
+                active?.description && <p>{active.description}</p>
+              )}
             </div>
 
-            {!isDm && <span className="online-pill"><i /> {chat.online.size} online</span>}
+            {!isDm && !isGroup && (
+              <span className="online-pill">
+                <i /> {chat.online.size} online
+              </span>
+            )}
           </header>
 
           {chat.status !== 'connected' && (
@@ -171,7 +218,11 @@ export default function Chat() {
               {chat.status === 'error' ? "Can't reach the server. Retrying…" : 'Connecting…'}
             </div>
           )}
-          {note && <div className="conn-banner" role="status">{note}</div>}
+          {note && (
+            <div className="conn-banner" role="status">
+              {note}
+            </div>
+          )}
 
           <MessageList
             conversationId={chat.activeId}
@@ -182,7 +233,11 @@ export default function Chat() {
             myId={user._id}
             roomName={title}
             isDm={isDm}
+            isGroup={isGroup}
             readAt={otherReadAt}
+            hasMore={chat.hasMore}
+            loadingOlder={chat.loadingOlder}
+            onLoadOlder={chat.loadOlder}
             onEdit={chat.editMessage}
             onDelete={chat.deleteMessage}
             onHide={chat.hideMessage}
@@ -194,6 +249,7 @@ export default function Chat() {
             key={chat.activeId}
             roomName={title}
             isDm={isDm}
+            isGroup={isGroup}
             onSend={sendMessage}
             replyTo={replyTo}
             onCancelReply={() => setReplyTo(null)}
@@ -208,7 +264,20 @@ export default function Chat() {
             <NewRoomModal key="new" onCreate={chat.createRoom} onClose={() => setShowNew(false)} />
           )}
           {showDm && (
-            <NewMessageModal key="dm" online={chat.online} onPick={chat.openDm} onClose={() => setShowDm(false)} />
+            <NewMessageModal
+              key="dm"
+              online={chat.online}
+              onPick={chat.openDm}
+              onClose={() => setShowDm(false)}
+            />
+          )}
+          {showGroup && (
+            <NewGroupModal
+              key="group"
+              myId={user._id}
+              onCreateGroup={chat.createGroup}
+              onClose={() => setShowGroup(false)}
+            />
           )}
           {showPalette && (
             <CommandPalette

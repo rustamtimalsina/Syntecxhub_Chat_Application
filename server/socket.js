@@ -6,7 +6,6 @@ const mongoose = require('mongoose');
 const ReadState = require('./models/ReadState');
 const REACTION_KEYS = ['like', 'love', 'laugh', 'wow', 'fire', 'thanks'];
 
-
 const room = (id) => `convo:${id}`;
 
 module.exports = function setupSocket(io) {
@@ -30,12 +29,15 @@ module.exports = function setupSocket(io) {
   io.on('connection', async (socket) => {
     const userId = String(socket.user._id);
 
-    // 2. Join every channel and every DM this user belongs to
+    // 2. Join every channel, group, and DM this user belongs to
     const convos = await Conversation.find({
-      $or: [{ type: 'channel' }, { type: 'dm', members: socket.user._id }],
+      $or: [
+        { type: 'channel' },
+        { type: { $in: ['dm', 'group'] }, members: socket.user._id },
+      ],
     }).select('_id');
     socket.join(convos.map((c) => room(c._id)));
-    socket.join(`user:${userId}`);   // a personal room, so we can message one user's tabs
+    socket.join(`user:${userId}`); // personal room, so we can message one user's tabs
 
     // 3. Presence
     if (!online.has(userId)) online.set(userId, new Set());
@@ -45,44 +47,70 @@ module.exports = function setupSocket(io) {
 
     // 4. Send a message
     const sent = [];
-        socket.on('message:send', async ({ conversationId, text, replyTo } = {}, ack = () => {}) => {
-      try {
-        const now = Date.now();
-        while (sent.length && now - sent[0] > 5000) sent.shift();
-        if (sent.length >= 10) return ack({ ok: false, error: 'Slow down a little' });
-        sent.push(now);
+    socket.on(
+      'message:send',
+      async ({ conversationId, text, replyTo, attachment } = {}, ack = () => {}) => {
+        try {
+          const now = Date.now();
+          while (sent.length && now - sent[0] > 5000) sent.shift();
+          if (sent.length >= 10) return ack({ ok: false, error: 'Slow down a little' });
+          sent.push(now);
 
-        const clean = typeof text === 'string' ? text.trim() : '';
-        if (!clean) return ack({ ok: false, error: 'Message is empty' });
-        if (clean.length > 2000) return ack({ ok: false, error: 'Message is too long' });
-        if (!socket.rooms.has(room(conversationId))) {
-          return ack({ ok: false, error: 'You are not part of this conversation' });
+          const clean = typeof text === 'string' ? text.trim() : '';
+          const validAttachment =
+            attachment && typeof attachment.url === 'string'
+              ? {
+                  url: attachment.url,
+                  publicId: attachment.publicId || null,
+                  fileName: attachment.fileName || null,
+                  fileType: attachment.fileType || null,
+                  size: typeof attachment.size === 'number' ? attachment.size : null,
+                }
+              : null;
+
+          if (!clean && !validAttachment) {
+            return ack({ ok: false, error: 'Message cannot be empty' });
+          }
+          if (clean.length > 2000) return ack({ ok: false, error: 'Message is too long' });
+          if (!socket.rooms.has(room(conversationId))) {
+            return ack({ ok: false, error: 'You are not part of this conversation' });
+          }
+
+          let replyId = null;
+          if (replyTo) {
+            const original = mongoose.isValidObjectId(replyTo)
+              ? await Message.findOne({ _id: replyTo, conversation: conversationId }).select('_id')
+              : null;
+            if (!original) return ack({ ok: false, error: 'The original message was not found' });
+            replyId = original._id;
+          }
+
+          const msg = await Message.create({
+            conversation: conversationId,
+            sender: socket.user._id,
+            text: clean,
+            replyTo: replyId,
+            attachment: validAttachment,
+          });
+
+          await msg.populate([
+            { path: 'sender', select: 'name color' },
+            {
+              path: 'replyTo',
+              select: 'text attachment deleted sender',
+              populate: { path: 'sender', select: 'name color' },
+            },
+          ]);
+
+          io.to(room(conversationId)).emit('message:new', msg);
+          ack({ ok: true, message: msg });
+        } catch {
+          ack({ ok: false, error: 'Could not send message' });
         }
-                let replyId = null;
-        if (replyTo) {
-          const original = mongoose.isValidObjectId(replyTo)
-            ? await Message.findOne({ _id: replyTo, conversation: conversationId }).select('_id')
-            : null;
-          if (!original) return ack({ ok: false, error: 'The original message was not found' });
-          replyId = original._id;
-        }
-        const msg = await Message.create({
-          conversation: conversationId,
-          sender: socket.user._id,
-          text: clean,
-          replyTo: replyId,
-        });
-                await msg.populate([
-          { path: 'sender', select: 'name color' },
-          { path: 'replyTo', select: 'text deleted sender', populate: { path: 'sender', select: 'name color' } },
-        ]);
-        io.to(room(conversationId)).emit('message:new', msg);
-        ack({ ok: true });
-      } catch {
-        ack({ ok: false, error: 'Could not send message' });
       }
-    });
-        // 4b. Edit and delete (only your own messages)
+    );
+
+    // 4b. Edit and delete (only your own messages)
     const tooFast = () => {
       const now = Date.now();
       while (sent.length && now - sent[0] > 5000) sent.shift();
@@ -99,14 +127,25 @@ module.exports = function setupSocket(io) {
         if (!clean) return ack({ ok: false, error: 'Message is empty' });
         if (clean.length > 2000) return ack({ ok: false, error: 'Message is too long' });
 
-        const msg = await Message.findOne({ _id: messageId, sender: socket.user._id, deleted: { $ne: true } });
+        const msg = await Message.findOne({
+          _id: messageId,
+          sender: socket.user._id,
+          deleted: { $ne: true },
+        });
         if (!msg) return ack({ ok: false, error: 'Message not found' });
         if (!socket.rooms.has(room(msg.conversation))) return ack({ ok: false, error: 'Not allowed' });
 
         msg.text = clean;
         msg.edited = true;
         await msg.save();
-        await msg.populate('sender', 'name color');
+        await msg.populate([
+          { path: 'sender', select: 'name color' },
+          {
+            path: 'replyTo',
+            select: 'text attachment deleted sender',
+            populate: { path: 'sender', select: 'name color' },
+          },
+        ]);
         io.to(room(msg.conversation)).emit('message:updated', msg);
         ack({ ok: true });
       } catch {
@@ -126,16 +165,25 @@ module.exports = function setupSocket(io) {
         if (!msg.deleted) {
           msg.deleted = true;
           msg.text = '';
+          msg.attachment = null;
           await msg.save();
         }
-        await msg.populate('sender', 'name color');
+        await msg.populate([
+          { path: 'sender', select: 'name color' },
+          {
+            path: 'replyTo',
+            select: 'text attachment deleted sender',
+            populate: { path: 'sender', select: 'name color' },
+          },
+        ]);
         io.to(room(msg.conversation)).emit('message:updated', msg);
         ack({ ok: true });
       } catch {
         ack({ ok: false, error: 'Could not delete message' });
       }
     });
-        // 4c. Delete for me: hide any message from my own view only
+
+    // 4c. Delete for me: hide any message from my own view only
     socket.on('message:hide', async ({ messageId } = {}, ack = () => {}) => {
       try {
         if (tooFast()) return ack({ ok: false, error: 'Slow down a little' });
@@ -156,7 +204,8 @@ module.exports = function setupSocket(io) {
         ack({ ok: false, error: 'Could not delete the message' });
       }
     });
-        // 4d. Read receipts (direct messages only)
+
+    // 4d. Read receipts (direct messages and groups)
     const lastReadEmit = {};
     socket.on('conversation:read', async ({ conversationId } = {}) => {
       try {
@@ -167,7 +216,7 @@ module.exports = function setupSocket(io) {
         lastReadEmit[conversationId] = nowMs;
 
         const convo = await Conversation.findById(conversationId).select('type');
-        if (!convo || convo.type !== 'dm') return;
+        if (!convo || !['dm', 'group'].includes(convo.type)) return;
 
         const at = new Date();
         await ReadState.updateOne(
@@ -180,9 +229,12 @@ module.exports = function setupSocket(io) {
           userId,
           at,
         });
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     });
-        // 4e. Reactions: one per person per message; tapping the same one again removes it
+
+    // 4e. Reactions: one per person per message; tapping the same one again removes it
     socket.on('message:react', async ({ messageId, key } = {}, ack = () => {}) => {
       try {
         if (tooFast()) return ack({ ok: false, error: 'Slow down a little' });
@@ -196,7 +248,10 @@ module.exports = function setupSocket(io) {
         const mine = msg.reactions.find((r) => String(r.user) === userId);
         await Message.updateOne({ _id: messageId }, { $pull: { reactions: { user: socket.user._id } } });
         if (!mine || mine.key !== key) {
-          await Message.updateOne({ _id: messageId }, { $push: { reactions: { user: socket.user._id, key } } });
+          await Message.updateOne(
+            { _id: messageId },
+            { $push: { reactions: { user: socket.user._id, key } } }
+          );
         }
 
         const fresh = await Message.findById(messageId).select('reactions');
