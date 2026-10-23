@@ -97,7 +97,7 @@
 
 /* ---------- Composer ---------- */
 .composer { padding: 6px 24px max(20px, env(safe-area-inset-bottom)); }
-.composer-inner { max-width: 860px; margin-inline: auto; }
+.composer-inner { position: relative; max-width: 860px; margin-inline: auto; }
 .typing-row { display: flex; align-items: center; gap: 8px; height: 24px; padding-left: 4px; color: var(--text-2); font-size: 0.8rem; }
 .tw { display: inline-flex; align-items: center; gap: 3px; height: 14px; }
 .tw i { width: 3px; height: 14px; border-radius: 2px; background: var(--accent); animation: tw 1s ease-in-out infinite; }

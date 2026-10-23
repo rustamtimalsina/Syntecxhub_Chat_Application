@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { SendHorizonal, X, Image as ImageIcon, Loader2, Mic, Trash2, Check } from 'lucide-react';
-import { uploadMedia, errorMessage } from '../lib/api';
+import { SendHorizonal, X, Image as ImageIcon, Loader2, Mic, Trash2, Check, AtSign } from 'lucide-react';
+import api, { uploadMedia, errorMessage } from '../lib/api';
 import Avatar from './Avatar.jsx';
 
 const typingText = (names) => {
@@ -27,6 +27,7 @@ export default function Composer({
   const [attachment, setAttachment] = useState(null); // { file, previewUrl, uploading, data }
   const [mentions, setMentions] = useState([]); // array of user IDs
   const [mentionQuery, setMentionQuery] = useState(null); // string | null (when typing @...)
+  const [userSuggestions, setUserSuggestions] = useState([]);
   const [recording, setRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
 
@@ -41,6 +42,36 @@ export default function Composer({
   useEffect(() => {
     if (replyTo) ref.current?.focus();
   }, [replyTo]);
+
+  // Load mention suggestions dynamically
+  useEffect(() => {
+    if (mentionQuery === null) {
+      setUserSuggestions([]);
+      return undefined;
+    }
+
+    if (members && members.length > 0) {
+      const q = mentionQuery.toLowerCase();
+      const filtered = members.filter((m) => !q || m.name.toLowerCase().includes(q));
+      setUserSuggestions(filtered);
+      return undefined;
+    }
+
+    // In public channels where members list is dynamic, fetch users from API
+    let cancelled = false;
+    api
+      .get('/users', { params: { q: mentionQuery } })
+      .then(({ data }) => {
+        if (!cancelled) setUserSuggestions(data);
+      })
+      .catch(() => {
+        if (!cancelled) setUserSuggestions([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mentionQuery, members]);
 
   const stopTyping = () => {
     clearTimeout(stopTimer.current);
@@ -60,8 +91,8 @@ export default function Composer({
     // Check for @mention trigger
     const cursorPos = e.target.selectionStart;
     const textBefore = val.slice(0, cursorPos);
-    const atMatch = textBefore.match(/@(\w*)$/);
-    if (atMatch && members.length > 0) {
+    const atMatch = textBefore.match(/@([\w\d_]*)$/);
+    if (atMatch) {
       setMentionQuery(atMatch[1].toLowerCase());
     } else {
       setMentionQuery(null);
@@ -75,11 +106,17 @@ export default function Composer({
     stopTimer.current = setTimeout(stopTyping, 2000);
   };
 
+  const triggerMention = () => {
+    setText((prev) => (prev && !prev.endsWith(' ') ? `${prev} @` : `${prev}@`));
+    setMentionQuery('');
+    ref.current?.focus();
+  };
+
   const pickMention = (user) => {
     const cursorPos = ref.current?.selectionStart || text.length;
     const textBefore = text.slice(0, cursorPos);
     const textAfter = text.slice(cursorPos);
-    const replaced = textBefore.replace(/@\w*$/, `@${user.name} `);
+    const replaced = textBefore.replace(/@[\w\d_]*$/, `@${user.name} `);
 
     setText(replaced + textAfter);
     setMentions((prev) => (prev.includes(user._id) ? prev : [...prev, user._id]));
@@ -236,11 +273,6 @@ export default function Composer({
     }
   };
 
-  const filteredMembers =
-    mentionQuery !== null
-      ? members.filter((m) => m.name.toLowerCase().includes(mentionQuery))
-      : [];
-
   const placeholder = roomName
     ? isDm
       ? `Message ${roomName}`
@@ -308,10 +340,10 @@ export default function Composer({
         )}
 
         {/* Mentions Autocomplete Popover */}
-        {filteredMembers.length > 0 && (
+        {mentionQuery !== null && userSuggestions.length > 0 && (
           <div className="mentions-popover" role="listbox">
-            <div className="mentions-header">Mention a member</div>
-            {filteredMembers.slice(0, 5).map((u) => (
+            <div className="mentions-header">Mention a user</div>
+            {userSuggestions.slice(0, 6).map((u) => (
               <button
                 key={u._id}
                 type="button"
@@ -379,6 +411,17 @@ export default function Composer({
                 disabled={disabled || attachment?.uploading}
               >
                 <ImageIcon size={19} />
+              </button>
+
+              <button
+                type="button"
+                className="icon-btn composer-attach"
+                onClick={triggerMention}
+                title="Mention someone (@)"
+                aria-label="Mention user"
+                disabled={disabled}
+              >
+                <AtSign size={19} />
               </button>
 
               <button
