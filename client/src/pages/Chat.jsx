@@ -387,6 +387,7 @@ export default function Chat() {
           remoteStream={call.remoteStream}
           audioMuted={call.audioMuted}
           videoMuted={call.videoMuted}
+          remoteVideoMuted={call.remoteVideoMuted}
           isScreenSharing={call.isScreenSharing}
           minimized={call.minimized}
           callDuration={call.callDuration}

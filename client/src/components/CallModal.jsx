@@ -25,6 +25,7 @@ export default function CallModal({
   remoteStream,
   audioMuted,
   videoMuted,
+  remoteVideoMuted,
   isScreenSharing,
   minimized,
   callDuration,
@@ -38,22 +39,36 @@ export default function CallModal({
   const remoteVideoRef = useRef(null);
 
   useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
+    const el = localVideoRef.current;
+    if (el && localStream) {
+      el.srcObject = localStream;
+      el.play?.().catch(() => {});
     }
   }, [localStream, videoMuted, isScreenSharing]);
 
   useEffect(() => {
-    if (remoteVideoRef.current && remoteStream) {
-      remoteVideoRef.current.srcObject = remoteStream;
+    const el = remoteVideoRef.current;
+    if (el && remoteStream) {
+      el.srcObject = remoteStream;
+      el.play?.().catch((err) => {
+        console.warn('Autoplay error on remote video:', err);
+      });
     }
-  }, [remoteStream]);
+  }, [remoteStream, remoteVideoMuted]);
 
   if (callState === 'idle' || callState === 'incoming') return null;
 
   const isVideo = callInfo?.isVideo || isScreenSharing;
   const isCalling = callState === 'calling';
   const other = callInfo?.otherUser || callInfo?.caller || { name: 'Contact', color: '#ffb547' };
+
+  // Detect if remote stream has an active video track
+  const hasRemoteVideo =
+    Boolean(remoteStream) &&
+    !isCalling &&
+    !remoteVideoMuted &&
+    remoteStream.getVideoTracks().length > 0 &&
+    remoteStream.getVideoTracks().some((t) => t.enabled);
 
   return (
     <div className={`call-viewport ${minimized ? 'minimized' : ''}`}>
@@ -86,13 +101,21 @@ export default function CallModal({
         </div>
 
         {/* Video / Visual Stage */}
-        <div className="call-stage">
+        <div
+          className="call-stage"
+          onClick={() => {
+            if (remoteVideoRef.current) {
+              remoteVideoRef.current.play?.().catch(() => {});
+            }
+          }}
+        >
           {/* Remote Video or Fallback Avatar */}
-          {remoteStream && !isCalling && remoteStream.getVideoTracks().length > 0 ? (
+          {hasRemoteVideo ? (
             <video
               ref={remoteVideoRef}
               autoPlay
               playsInline
+              onLoadedMetadata={(e) => e.target.play().catch(() => {})}
               className="remote-video"
             />
           ) : (
@@ -103,7 +126,15 @@ export default function CallModal({
               {!minimized && (
                 <div className="stage-status">
                   <h3>{other.name}</h3>
-                  <p>{isCalling ? 'Ringing...' : 'Connected'}</p>
+                  <p>
+                    {isCalling
+                      ? 'Ringing...'
+                      : remoteVideoMuted
+                      ? 'Camera turned off'
+                      : isVideo
+                      ? 'Connecting video…'
+                      : 'Audio call connected'}
+                  </p>
                 </div>
               )}
             </div>
@@ -117,6 +148,7 @@ export default function CallModal({
                 autoPlay
                 playsInline
                 muted
+                onLoadedMetadata={(e) => e.target.play().catch(() => {})}
                 className="local-video"
               />
             </div>

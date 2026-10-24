@@ -11,6 +11,19 @@ const ICE_SERVERS = {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:stun.services.mozilla.com' },
+    {
+      urls: [
+        'turn:openrelay.metered.ca:80',
+        'turn:openrelay.metered.ca:443',
+        'turn:openrelay.metered.ca:443?transport=tcp',
+      ],
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
   ],
 };
 
@@ -20,12 +33,25 @@ async function getMediaStream(wantVideo) {
   if (wantVideo) {
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: { echoCancellation: true, noiseSuppression: true },
+        video: {
+          facingMode: 'user',
+          width: { ideal: 1280, max: 1920 },
+          height: { ideal: 720, max: 1080 },
+        },
       });
       return { stream, isVideo: true };
     } catch (err) {
-      console.warn('Camera failed/in use, falling back to audio only:', err);
+      console.warn('HD camera constraints failed, trying basic video:', err);
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: true,
+        });
+        return { stream, isVideo: true };
+      } catch (err2) {
+        console.warn('Camera failed or in use, falling back to audio only:', err2);
+      }
     }
   }
 
@@ -35,7 +61,6 @@ async function getMediaStream(wantVideo) {
     return { stream, isVideo: false };
   } catch (err) {
     console.warn('Microphone access failed:', err);
-    // Silent empty media stream so connection doesn't instantly die
     return { stream: new MediaStream(), isVideo: false };
   }
 }
@@ -48,6 +73,8 @@ export default function useCall(socket, currentUser) {
   const [remoteStream, setRemoteStream] = useState(null);
   const [audioMuted, setAudioMuted] = useState(false);
   const [videoMuted, setVideoMuted] = useState(false);
+  const [remoteAudioMuted, setRemoteAudioMuted] = useState(false);
+  const [remoteVideoMuted, setRemoteVideoMuted] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
@@ -98,6 +125,8 @@ export default function useCall(socket, currentUser) {
     setCallInfo(null);
     setAudioMuted(false);
     setVideoMuted(false);
+    setRemoteAudioMuted(false);
+    setRemoteVideoMuted(false);
     setIsScreenSharing(false);
     setMinimized(false);
     setCallDuration(0);
@@ -157,7 +186,16 @@ export default function useCall(socket, currentUser) {
       // Remote media stream arrived
       pc.ontrack = (event) => {
         if (event.streams && event.streams[0]) {
-          setRemoteStream(event.streams[0]);
+          const s = event.streams[0];
+          setRemoteStream(new MediaStream(s.getTracks()));
+          s.onaddtrack = () => setRemoteStream(new MediaStream(s.getTracks()));
+          s.onremovetrack = () => setRemoteStream(new MediaStream(s.getTracks()));
+        } else if (event.track) {
+          setRemoteStream((prev) => {
+            const next = prev ? new MediaStream(prev.getTracks()) : new MediaStream();
+            next.addTrack(event.track);
+            return next;
+          });
         }
       };
 
@@ -180,6 +218,7 @@ export default function useCall(socket, currentUser) {
       // Add local stream tracks to PC
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((track) => {
+          track.enabled = true;
           pc.addTrack(track, localStreamRef.current);
         });
       }
@@ -231,8 +270,8 @@ export default function useCall(socket, currentUser) {
     if (!socket || !info || callStateRef.current !== 'incoming') return;
     stopRingtone();
 
-    // Get user media with fallback (so camera lock between tabs doesn't fail)
-    const { stream } = await getMediaStream(info.isVideo);
+    // Acquire media with graceful fallback
+    const { stream, isVideo: actualVideo } = await getMediaStream(info.isVideo);
     localStreamRef.current = stream;
     setLocalStream(stream);
     webcamTrackRef.current = stream.getVideoTracks()[0] || null;
@@ -244,6 +283,7 @@ export default function useCall(socket, currentUser) {
     socket.emit('call:accept', {
       callId: info.callId,
       conversationId: info.conversationId,
+      isVideo: actualVideo,
     });
 
     setCallState('connected');
@@ -454,6 +494,14 @@ export default function useCall(socket, currentUser) {
       }
     };
 
+    // Media toggled by remote user
+    const onMediaToggled = (data) => {
+      if (data.userId !== String(currentUser?._id)) {
+        if (typeof data.videoMuted === 'boolean') setRemoteVideoMuted(data.videoMuted);
+        if (typeof data.audioMuted === 'boolean') setRemoteAudioMuted(data.audioMuted);
+      }
+    };
+
     // Call ended by either party
     const onEnded = (data) => {
       if (!callInfoRef.current || callInfoRef.current.callId === data.callId) {
@@ -467,6 +515,7 @@ export default function useCall(socket, currentUser) {
     socket.on('call:rejected', onRejected);
     socket.on('call:signal', onSignal);
     socket.on('call:ice-candidate', onIceCandidate);
+    socket.on('call:media-toggled', onMediaToggled);
     socket.on('call:ended', onEnded);
 
     return () => {
@@ -475,6 +524,7 @@ export default function useCall(socket, currentUser) {
       socket.off('call:rejected', onRejected);
       socket.off('call:signal', onSignal);
       socket.off('call:ice-candidate', onIceCandidate);
+      socket.off('call:media-toggled', onMediaToggled);
       socket.off('call:ended', onEnded);
     };
   }, [
@@ -491,6 +541,8 @@ export default function useCall(socket, currentUser) {
     remoteStream,
     audioMuted,
     videoMuted,
+    remoteAudioMuted,
+    remoteVideoMuted,
     isScreenSharing,
     minimized,
     callDuration,
