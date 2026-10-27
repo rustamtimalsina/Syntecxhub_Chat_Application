@@ -1,8 +1,28 @@
 import axios from 'axios';
 
-const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || '/api' });
+const getBaseURL = () => {
+  let url = import.meta.env.VITE_API_URL || '/api';
+  if (
+    typeof window !== 'undefined' &&
+    window.location.protocol === 'https:' &&
+    url.startsWith('http://')
+  ) {
+    url = url.replace(/^http:\/\//i, 'https://');
+  }
+  return url;
+};
+
+const api = axios.create({ baseURL: getBaseURL() });
 
 api.interceptors.request.use((config) => {
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+    if (config.baseURL && config.baseURL.startsWith('http://')) {
+      config.baseURL = config.baseURL.replace(/^http:\/\//i, 'https://');
+    }
+    if (config.url && config.url.startsWith('http://')) {
+      config.url = config.url.replace(/^http:\/\//i, 'https://');
+    }
+  }
   const token = localStorage.getItem('token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;

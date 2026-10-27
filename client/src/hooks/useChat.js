@@ -4,7 +4,17 @@ import api from '../lib/api';
 import { playIncoming, playSent } from '../lib/sound';
 import { showNotification } from '../lib/notify';
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || undefined;
+const getSocketUrl = () => {
+  let url = import.meta.env.VITE_SOCKET_URL;
+  if (!url) return undefined;
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+    if (url.startsWith('http://')) url = url.replace(/^http:\/\//i, 'https://');
+    if (url.startsWith('ws://')) url = url.replace(/^ws:\/\//i, 'wss://');
+  }
+  return url;
+};
+
+const SOCKET_URL = getSocketUrl();
 
 const merge = (a, b) => {
   const map = new Map();
