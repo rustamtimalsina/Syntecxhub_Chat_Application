@@ -19,8 +19,28 @@ const seedDefaults = require('./utils/seed');
 
 const app = express();
 app.set('trust proxy', 1);
-app.use(helmet());
-app.use(cors({ origin: process.env.CLIENT_URL || '*' }));
+app.use(helmet({ crossOriginResourcePolicy: false }));
+
+const getCorsOrigins = () => {
+  const envUrl = process.env.CLIENT_URL;
+  if (!envUrl || envUrl === '*') return '*';
+  return envUrl.split(',').map((u) => u.trim());
+};
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      const origins = getCorsOrigins();
+      if (origins === '*') return callback(null, true);
+      if (origins.includes(origin) || origin.endsWith('.vercel.app') || origin.includes('localhost')) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: '10kb' }));
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
@@ -42,7 +62,10 @@ app.use('/api/conversations', require('./routes/conversations'));
 // Socket.io shares the same HTTP server as Express
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: process.env.CLIENT_URL || '*' },
+  cors: {
+    origin: (origin, callback) => callback(null, true),
+    credentials: true,
+  },
 });
 
 // Optional Redis Adapter for horizontal multi-instance scaling
